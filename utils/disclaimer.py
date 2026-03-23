@@ -16,7 +16,7 @@ LINES = [
     ("", None, 'gap'),
     ("This software is unfinished and under active development.", TEXT, 'small'),
     ("You will encounter bugs, missing features, and placeholder content.", TEXT, 'small'),
-    ("This public alpha is to test the simulation and recieve feedback.", TEXT, 'small'),
+    ("This public alpha is to test the simulation and receive feedback.", TEXT, 'small'),
     ("", None, 'gap'),
     ("The electrical grid model is a fictional representation of a", DIM, 'small'),
     ("fictional city. Any resemblance to real infrastructure is coincidental.", DIM, 'small'),
