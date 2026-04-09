@@ -1,0 +1,38 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pygame pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --onefile --windowed --icon="assets/grid_controller.ico" --add-data "maps;maps" --add-data "utils;utils" --add-data "assets;assets" --name "GridControllerSimulator" main.py
+
+
+      - name: Zip the .app
+        run: |
+          cd dist
+          zip -r GridControllerSimulator-mac.zip GridControllerSimulator.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GridControllerSimulator-mac
+          path: dist/GridControllerSimulator-mac.zip
