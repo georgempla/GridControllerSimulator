@@ -1,5 +1,5 @@
 from importlib.resources import read_text
-from nt import truncate
+from os import truncate
 from tkinter.ttk import Label
 
 import pygame, math
