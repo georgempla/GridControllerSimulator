@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+
 from pygame.event import set_keyboard_grab
 
 INERTIA_CONSTANTS = {
@@ -116,10 +117,24 @@ class StorageState:
     def can_discharge(self):
         return self.soc_percent>self.min_soc_pecent
 
+@dataclass
+class SubstationState:
+    id: str
+    name: str
+    node_id: str
+    voltage_primary_kv: int
+    voltage_secondary_kv: int
+    transformer_count: int
+    transformer_capacity_mva_each: int
+    n_minus_1_capable: bool
+    busbar_configuration: str
+
+    status: str = 'online'
+
 #ENGINE
 class SimulationEngine:
     TICK_SECONDS = 1.0
-    F_NOMINAL = 60.0
+
     INERTIA_MULTIPLIER=1
 
     UFLS_STAGES = [
@@ -130,13 +145,13 @@ class SimulationEngine:
         3:61.2,
         2:61.3
     }
-    COLLAPSE_HZ = 58.4
 
-    def __init__(self, grid_data:dict):
+
+    def __init__(self, grid_data:dict,freq,lines):
         self.data = grid_data
         self.time_multiplier = 1.0
         self.sim_time_min = 300.0
-        self.frequency_hz =60.0
+        self.frequency_hz =freq
         self.alarms: List[dict] = []
         self.game_over = False
         self.game_over_reason = ''
@@ -148,16 +163,23 @@ class SimulationEngine:
         self.sim_day = 0
         self.score = 0.0
         self._score_display = 0
+        self.F_NOMINAL = freq
+
+        self.COLLAPSE_HZ = freq-1.6
 
         self.generators: Dict[str, GeneratorState] = {}
         self.lines: Dict[str, LineState] = {}
         self.loads: Dict[str, LoadState] = {}
         self.storage: Dict[str, StorageState] = {}
+        self.substations: Dict[str, SubstationState] = {}
         self.node_ids: List[str] = []
 
         self._build_state(grid_data)
         self._build_bus_index()
         self._build_b_matrix()
+        self.reachable = self._get_reachable_buses()
+
+        self.freq_score, self.export_score = 0,0
 
         for g in self.generators.values():
             if g.status == 'online':
@@ -253,6 +275,24 @@ class SimulationEngine:
                 current_demand_mw=load.get('average_demand_mw',0)
             )
             self.loads[load['id']] =ld
+        for sub in data['substation_nodes']:
+            pos = sub.get('position')
+            if pos is None:
+                continue
+            if sub['id'] == "SUB-009":
+                continue
+            s = SubstationState(
+                id=sub['id'],
+                name=sub['name'],
+                node_id=sub['id'],
+                voltage_primary_kv=sub['voltage_primary_kv'],
+                voltage_secondary_kv=sub['voltage_secondary_kv'],
+                transformer_count=sub['transformer_count'],
+                transformer_capacity_mva_each=sub['transformer_capacity_mva_each'],
+                n_minus_1_capable=sub['n_minus_1_capable'],
+                busbar_configuration=sub['busbar_configuration']
+            )
+            self.substations[sub['id']] =s
     def _build_bus_index(self):
         ids = set()
         for sub in self.data['substation_nodes']:
@@ -263,9 +303,12 @@ class SimulationEngine:
             ids.add(sid)
         for lid in self.loads:
             ids.add(lid)
+
+
         self.node_ids = sorted(ids)
         self.bus_index = {nid:i for i, nid in enumerate(self.node_ids)}
         self.n_buses = len(self.node_ids)
+        #print(f"[DEBUG] bus_index keys: {list(self.bus_index.keys())}")
     def _build_b_matrix(self):
         # Build DC power flow susceptance matrix B
         #B[i][i] = sum of susceptances of all lines at bus i
@@ -286,31 +329,69 @@ class SimulationEngine:
             B[ti][ti] += b
             B[fi][ti] -= b
             B[ti][fi] -= b
+        #grounding admittance prevent singular matrix
+        for i in range(n):
+            if B[i][i] == 0:
+                B[i][i] = 1e-4
         self.B_full = B
+
+    def _get_reachable_buses(self):
+        slack_id = 'SUB-001'
+        visited = {slack_id}
+        queue = [slack_id]
+
+        online_lines = [l for l in self.lines.values() if l.status=='online']
+
+        adj = {nid:[] for nid in self.node_ids}
+        for line in self.lines.values():
+            if line.status == 'online':
+                if line.from_node in adj and line.to_node in adj:
+
+                    adj[line.from_node].append(line.to_node)
+                    adj[line.to_node].append(line.from_node)
+        while queue:
+            node = queue.pop(0)
+            for neighbour in adj.get(node,[]):
+                if neighbour not in visited:
+                    visited.add(neighbour)
+                    queue.append(neighbour)
+        #print(f"[BFS] online lines: {len(online_lines)}")
+        if online_lines:
+            l = online_lines[0]
+            #print(
+            #    f"[BFS] sample: {l.id} {l.from_node}->{l.to_node}, from_in_adj: {l.from_node in adj if 'adj' in dir() else 'adj not built yet'}")
+
+        return visited
+
     def _solve_dc_power_flow(self):
         # Solve dc powerflow using reduced B matrix (SUB-001 as slack) dict{line_id:flow_mw}
         slack_id = 'SUB-001'
         slack_idx = self.bus_index.get(slack_id,0)
+        reachable = self.reachable
 
         P = np.zeros(self.n_buses)
 
         for g in self.generators.values():
             idx = self.bus_index.get(g.node_id)
             if idx is not None and g.status == 'online':
-                P[idx] += g.current_output_mw
+                if g.node_id in reachable:
+                    P[idx] += g.current_output_mw
         for s in self.storage.values():
             idx = self.bus_index.get(s.node_id)
             if idx is not None and s.status == 'online':
-                P[idx] -= s.charge_rate_mw
+                if s.node_id in reachable:
+                    P[idx] -= s.charge_rate_mw
         for load in self.loads.values():
             idx = self.bus_index.get(load.node_id)
             if idx is not None:
-                net_demand = load.current_demand_mw - load.shed_mw
-                P[idx] -= max(0.0, net_demand)
+                if load.node_id in reachable:
+                    net_demand = load.current_demand_mw - load.shed_mw
+                    P[idx] -= max(0.0, net_demand)
         hvdc_idx = self.bus_index.get('SUB-009')
-        if hvdc_idx is not None:
+        #print(f"[DEBUG] SUB-09 is bus_index: {hvdc_idx}, P before inject: {P[hvdc_idx] if hvdc_idx is not None else 'NONE'}")
+        if hvdc_idx is not None and 'SUB-009' in reachable:
             P[hvdc_idx] -= self.hvdc_flow_mw
-
+        #print(f"[DEBUG] P[SUB-009] after inject: {P[hvdc_idx] if hvdc_idx is not None else 'None'}")
         mask = [i for i in range(self.n_buses) if i != slack_idx]
         B_red = self.B_full[np.ix_(mask,mask)]
         P_red = P[mask]
@@ -318,12 +399,12 @@ class SimulationEngine:
         try:
             theta_red = np.linalg.solve(B_red,P_red)
         except np.linalg.LinAlgError:
-            return {}
+            print(f"[POWERFLOW] Singular B matrix, falling back to lstsq")
+            theta_red, _, _, _ = np.linalg.lstsq(B_red,P_red,rcond=None)
 
         theta = np.zeros(self.n_buses)
         for i,val in zip(mask, theta_red):
             theta[i] = val
-
         flows= {}
         for line in self.lines.values():
             if line.status != 'online':
@@ -334,12 +415,15 @@ class SimulationEngine:
             if fi is None or ti is None:
                 flows[line.id] = 0.0
                 continue
+            if line.from_node not in reachable or line.to_node not in reachable:
+                flows[line.id] = 0.0
+                continue
             b = 1.0/ line.impedance_pu
             flows[line.id] = b*(theta[fi]-theta[ti])
         return flows
 
     def _tick_time(self, dt_seconds):
-        self.sim_time_min += dt_seconds/60.0
+        self.sim_time_min += dt_seconds/5.0
         if self.sim_time_min >= 1440:
             self.sim_time_min -= 1440
             self.sim_day +=1
@@ -366,6 +450,10 @@ class SimulationEngine:
         hour_progress = total_hours%1.0
 
         for load in self.loads.values():
+            if load.id not in self.reachable:
+                load.current_demand_mw = 0.0
+                continue
+
             profile = profiles.get(load.demand_profile, profiles['flat'])
             factors = profile['hourly_factors']
             hourly_factor = (factors[current_hour]*(1.0-hour_progress)+ factors[next_hour]*hour_progress)
@@ -415,7 +503,12 @@ class SimulationEngine:
         dt_min = dt_seconds/60.0
         season = self.current_season
         for g in self.generators.values():
-            
+            if g.node_id not in self.reachable:
+                if g.status == 'tripped':
+                    continue
+                g.current_output_mw = 0.0
+                g.status = 'tripped'
+                continue
             if g.status == 'tripped':
                 g.current_output_mw=0.0
                 if g.outage_timer>=0: 
@@ -439,6 +532,7 @@ class SimulationEngine:
             if g.status != 'online':
                 
                 continue
+
             if g.fuel_type == 'wind':
                 g.current_output_mw = self._calc_wind_output(g)
                 g.setpoint_mw = g.current_output_mw
@@ -463,10 +557,20 @@ class SimulationEngine:
             max_delta= g.ramp_rate_mw_per_min *dt_min
             g.current_output_mw += math.copysign(min(abs(delta), max_delta), delta)
 
+    def _tick_substation(self):
+        for s in self.substations.values():
+            if s.id in self.reachable and s.status == 'tripped':
+                s.status = 'online'
+            elif s.id not in self.reachable and s.status == 'online':
+                s.status = 'tripped'
     def _tick_storage(self, dt_seconds):
         dt_hours = dt_seconds/3600.0
         for s in self.storage.values():
             if s.status != 'online':
+                continue
+            if s.node_id not in self.reachable:
+                s.charge_rate_mw = 0.0
+                s.status = 'tripped'
                 continue
             ramp_rate_mw_per_sec = s.max_charge_rate_mw/s.response_time_seconds
             delta = s.setpoint_mw-s.charge_rate_mw
@@ -498,17 +602,27 @@ class SimulationEngine:
         self.hvdc_flow_mw += math.copysign(min(abs(delta),max_step),delta)
     def _tick_power_flow(self):
         flows = self._solve_dc_power_flow()
+        if not flows:
+            print("[POWERFLOW] returned empty B matrix singular")
+            return
+        tl3 = flows.get('TL-003','missing')
+        #print(f"[POWERFLOW] TL-003={tl3:.1f} HVDC={self.hvdc_flow_mw:.1f}")
         for lid, flow in flows.items():
             if lid in self.lines:
                 self.lines[lid].flow_mw = flow
     def _tick_frequency(self,dt_seconds):
         #swing equation to calculate frequency
-        total_gen = sum(g.current_output_mw for g in self.generators.values() if g.status =='online' or g.status == 'tripping')
+        total_gen = sum(g.current_output_mw for g in self.generators.values() if g.status =='online' or g.status == 'tripping' and g.node_id in self.reachable)
         for s in self.storage.values():
-            if s.status =='online':
+            if s.status =='online' and s.node_id in self.reachable:
                 total_gen -= s.charge_rate_mw
+        if 'SUB-009' not in self.reachable:
+            self.hvdc_flow_mw = 0.0
+            self.hvdc_setpoint_mw = 0.0
         total_gen -= self.hvdc_flow_mw
-        total_load = sum(max(0.0, l.current_demand_mw-l.shed_mw)for l in self.loads.values())
+        total_load = sum(max(0.0, l.current_demand_mw-l.shed_mw)for l in self.loads.values()
+                         if l.node_id in self.reachable
+                         )
         imbalance = total_gen - total_load
 
         total_inertia = sum(g.inertia_constant*g.installed_capacity_mw for g in self.generators.values() if g.status == 'online' and g.inertia_constant>0)*self.INERTIA_MULTIPLIER
@@ -519,8 +633,8 @@ class SimulationEngine:
         else:
             df_dt = (imbalance/(2*total_inertia)) *self.F_NOMINAL
             self.frequency_hz += df_dt*dt_seconds
-            self.frequency_hz = max(57.0,min(63.0,self.frequency_hz))
-        if self.frequency_hz <=59.5:
+            self.frequency_hz = max(self.F_NOMINAL-3.0,min(self.F_NOMINAL+3.0,self.frequency_hz))
+        if self.frequency_hz <=self.F_NOMINAL-0.5:
             self.time_multiplier = 1
     def _tick_protection(self,dt_seconds):
         for line in self.lines.values():
@@ -531,14 +645,24 @@ class SimulationEngine:
                 line.overload_timer += dt_seconds
                 relay_time = max(0.1,2.0-(loading-1.0)*10)
                 if line.overload_timer >= relay_time:
-                    self._trip_line()
-            if loading > 0.8:
+                    self._trip_line(line)
+            elif loading > 0.95:
+                for i,alarm in enumerate(self.alarms):
+                    if line.name in alarm.get('text',''):
+                        self.alarms.pop(i)
                 self._add_alarm(
                     f"{line.name} {loading*100:.0f}% loaded",
                     'warning' if loading<0.95 else 'critical'
                 )
             else:
                 line.overload_timer = 0.0
+    def restore_line(self,line_id):
+        line = self.lines.get(line_id)
+        if line and line.status == 'tripped':
+            line.status = 'online'
+            line.overload_timer = 0.0
+            self._build_b_matrix()
+            self._add_alarm(f"{line.name} restored",'info')
     def _trip_line(self, line: LineState):
         line.status = 'tripped'
         line.flow_mw = 0.0
@@ -551,16 +675,15 @@ class SimulationEngine:
         while changed and iterations<20:
             changed = False
             iterations +=1
-            flows = self._solve_dc_power_flow()
-            for lid, flow in flows.items():
-                line = self.lines.get(lid)
-                if abs(flow)>line.thermal_limit_mw*1.0:
+            self._tick_power_flow()
+            for line in self.lines.values():
+                if line.status == 'online' and abs(line.flow_mw)>line.thermal_limit_mw*1.05:
                     self._trip_line(line)
                     changed = True
                     break
     def _tick_ufls(self):
         #Auto Load shed (HAS BEEN DEACTIVATED FOR MAKING GAMEPLAY TOO EASY)
-        shed_occured = False
+        """shed_occured = False
         for threshold_hz, priority_class, alarm_text in self.UFLS_STAGES:
             if self.frequency_hz< threshold_hz:
                 self._add_alarm(alarm_text,'critical')
@@ -584,7 +707,7 @@ class SimulationEngine:
                     if load.priority_class ==2 and load.shed_mw > 0:
                         load.shed_mw = max(0.0, load.shed_mw - 1.0)
 
-        """for threshold_hz, priority_class, alarm_text in self.UFLS_STAGES:
+        for threshold_hz, priority_class, alarm_text in self.UFLS_STAGES:
 
             if self.frequency_hz<threshold_hz:
                 for load in self.loads.values():
@@ -605,7 +728,7 @@ class SimulationEngine:
                     load.shed_mw = max(0.0,load.shed_mw-1.0)"""
         if self.frequency_hz<self.COLLAPSE_HZ:
             self.game_over=True
-            self.game_over_reason = "Grid collapse - frequency below 58.4 Hz"
+            self.game_over_reason = f"Grid collapse - frequency below {self.F_NOMINAL-1.6} Hz"
     def _tick_events(self, dt_seconds):
         ticks_per_hour = 3600/dt_seconds
         for g in self.generators.values():
@@ -636,12 +759,20 @@ class SimulationEngine:
             freq_score = 0.2
         else:
             freq_score = 0.0
-            
+        total_flow = 0
+        possible_flow = 0
+        for s in self.storage.values():
+            if s.charge_rate_mw>=0:
+                total_flow +=s.charge_rate_mw/s.max_charge_rate_mw
+            else:
+                total_flow += s.charge_rate_mw / s.max_discharge_rate_mw
+            possible_flow += 1
+        battery_score =total_flow/possible_flow
         ic = self.data['interconnects'][0]
         max_export = ic['max_export_mw']
         export_score = self.hvdc_flow_mw/max_export
-        
-        tick_score = (freq_score*0.7+export_score*0.3)*dt_seconds
+        self.freq_score,self.export_score,self.battery_score = freq_score,export_score,battery_score
+        tick_score = (freq_score*0.5+export_score*0.3+battery_score+0.2)*dt_seconds
         self.score = max(0.0,self.score+tick_score)
 
 
@@ -669,6 +800,8 @@ class SimulationEngine:
         s=self.storage.get(storage_id)
         if not s:
             return
+        if s.status == 'tripped' and storage_id in self.reachable:
+            s.status = 'online'
         if rate_mw>0:
             s.setpoint_mw = min(rate_mw, s.max_charge_rate_mw)
         else:
@@ -693,10 +826,12 @@ class SimulationEngine:
         self._tick_weather(sim_dt)
         self._tick_dispatch(sim_dt)
         self._tick_storage(sim_dt)
+        self._tick_substation()
         self._tick_hvdc(sim_dt)
         self._tick_power_flow()
         self._tick_protection(sim_dt)
         self._check_cascade()
+        self.reachable = self._get_reachable_buses()
         self._tick_frequency(sim_dt)
         self._tick_ufls()
         self._tick_events(sim_dt)
@@ -734,8 +869,9 @@ class SimulationEngine:
                 'minute':self.sim_time_min%60,
                 'hour': self.current_hour,
                 'season':self.current_season,
-                'day':int(self.sim_time_min/(60*24))+1,
+                'day':self.sim_day,
                 'score': int(self.score),
+                'score_details':[self.freq_score*0.5,self.export_score*0.3,self.battery_score*0.2],
                 'gen_online':gen_online,
                 'gen_total': len(self.generators),
                 'total_capacity_mw': sum(

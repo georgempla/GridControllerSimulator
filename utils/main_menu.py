@@ -111,8 +111,8 @@ class MainMenu:
         bw=160
         bh=36
         by = self.screen_h-bh-18
-        self.tutorial_rect = pygame.Rect(cx-bw-170,by,bw,bh)
-        self.achievments_rect = pygame.Rect(cx-bw//2,by,bw,bh)
+        self.tutorial_rect = pygame.Rect(cx-bw//2,by,bw,bh)
+        self.settings_rect = pygame.Rect(cx-bw-170,by,bw,bh)
         self.quit_rect = pygame.Rect(cx+170,by,bw,bh)
 
     def handle_event(self, event):
@@ -123,6 +123,8 @@ class MainMenu:
                     return item['id']
             if self.tutorial_rect.collidepoint(pos):
                 return 'tutorial'
+            if self.settings_rect.collidepoint(pos):
+                return 'settings'
             if self.quit_rect.collidepoint(pos):
                 return 'quit'
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -149,10 +151,10 @@ class MainMenu:
             self._draw_item(surface,item,self.items_rects[item['id']],mouse)
 
         self._draw_bottom_btn(surface, self.tutorial_rect,"TUTORIAL",False,mouse)
-        self._draw_bottom_btn(surface, self.achievments_rect,"ACHIEVEMENTS",True,mouse)
+        self._draw_bottom_btn(surface, self.settings_rect,"SETTINGS",False,mouse)
         self._draw_bottom_btn(surface, self.quit_rect, "QUIT",False,mouse)
 
-        ver = self.font_small.render("v0.1.0-alpha",True,(35,45,58))
+        ver = self.font_small.render("v0.1.1-alpha",True,(35,45,58))
         surface.blit(ver,(self.screen_w-ver.get_width()-8,self.screen_h-ver.get_height()-6))
 
     def _draw_item(self,surface,item,rect,mouse):

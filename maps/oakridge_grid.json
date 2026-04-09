@@ -399,6 +399,20 @@
 
   "transmission_lines": [
     {
+      "id": "TL-000",
+      "name": "Nuclear GSU Connection",
+      "from_node": "GEN-001",
+      "to_node": "SUB-008",
+      "voltage_kv": 500,
+      "length_km": 0.5,
+      "thermal_limit_mw": 1600,
+      "impedance_pu": 0.01,
+      "conductor_type": "busbar",
+      "circuits": 2,
+      "status": "online",
+      "notes": "Generator step-up transformer connection, GEN-001 to switchyard"
+    },
+    {
       "id": "TL-001",
       "name": "Nuclear-Central 500kV Line A",
       "from_node": "SUB-008",
@@ -453,7 +467,7 @@
       "to_node": "SUB-004",
       "voltage_kv": 138,
       "length_km": 12,
-      "thermal_limit_mw": 350,
+      "thermal_limit_mw": 500,
       "impedance_pu": 0.028,
       "resistance_ohm_per_km": 0.18,
       "conductor_type": "ACSR",
@@ -480,7 +494,7 @@
     },
     {
       "id": "TL-006",
-      "name": "Gas Plant-Central 138kV",
+      "name": "Gas Plant Central 138kV",
       "from_node": "GEN-003",
       "to_node": "SUB-001",
       "voltage_kv": 138,
@@ -565,7 +579,7 @@
       "to_node": "SUB-005",
       "voltage_kv": 138,
       "length_km": 9,
-      "thermal_limit_mw": 200,
+      "thermal_limit_mw": 280,
       "impedance_pu": 0.022,
       "resistance_ohm_per_km": 0.18,
       "conductor_type": "ACSR",
@@ -592,7 +606,7 @@
     },
     {
       "id": "TL-013",
-      "name": "Peaker Plants-Central 138kV",
+      "name": "Peaker Plants-A 138kV",
       "from_node": "GEN-006",
       "to_node": "SUB-001",
       "voltage_kv": 138,
@@ -637,6 +651,22 @@
       "status": "online",
       "year_installed": 1991,
       "notes": "Bidirectional. Charges and discharges through this line."
+    },
+    {
+      "id": "TL-016",
+      "name": "Peaker Plants-B 138kV",
+      "from_node": "GEN-007",
+      "to_node": "SUB-001",
+      "voltage_kv": 138,
+      "length_km": 8,
+      "thermal_limit_mw": 500,
+      "impedance_pu": 0.02,
+      "resistance_ohm_per_km": 0.18,
+      "conductor_type": "ACSR_bundle",
+      "circuits": 2,
+      "status": "online",
+      "year_installed": 2008,
+      "notes": "CCGT output line. Must handle up to 480MW. Double circuit."
     }
   ],
 
@@ -648,7 +678,7 @@
       "to_node": "LOAD-001",
       "voltage_kv": 25,
       "length_km": 5,
-      "thermal_limit_mw": 80,
+      "thermal_limit_mw": 150,
       "circuits": 1,
       "status": "online"
     },
@@ -659,7 +689,7 @@
       "to_node": "LOAD-002",
       "voltage_kv": 25,
       "length_km": 6,
-      "thermal_limit_mw": 80,
+      "thermal_limit_mw": 200,
       "circuits": 1,
       "status": "online"
     },
@@ -670,7 +700,7 @@
       "to_node": "LOAD-003",
       "voltage_kv": 25,
       "length_km": 2,
-      "thermal_limit_mw": 120,
+      "thermal_limit_mw": 220,
       "circuits": 2,
       "status": "online"
     },
@@ -693,7 +723,7 @@
       "to_node": "LOAD-005",
       "voltage_kv": 25,
       "length_km": 3,
-      "thermal_limit_mw": 200,
+      "thermal_limit_mw": 350,
       "circuits": 2,
       "status": "online"
     },
@@ -704,7 +734,7 @@
       "to_node": "LOAD-006",
       "voltage_kv": 25,
       "length_km": 7,
-      "thermal_limit_mw": 80,
+      "thermal_limit_mw": 150,
       "circuits": 1,
       "status": "online"
     },
@@ -715,7 +745,7 @@
       "to_node": "LOAD-007",
       "voltage_kv": 25,
       "length_km": 8,
-      "thermal_limit_mw": 80,
+      "thermal_limit_mw": 150,
       "circuits": 1,
       "status": "online"
     },
@@ -726,7 +756,7 @@
       "to_node": "LOAD-008",
       "voltage_kv": 25,
       "length_km": 4,
-      "thermal_limit_mw": 150,
+      "thermal_limit_mw": 200,
       "circuits": 2,
       "status": "online"
     },
@@ -737,7 +767,7 @@
       "to_node": "LOAD-009",
       "voltage_kv": 25,
       "length_km": 5,
-      "thermal_limit_mw": 80,
+      "thermal_limit_mw": 150,
       "circuits": 1,
       "status": "online"
     },
@@ -748,7 +778,7 @@
       "to_node": "LOAD-010",
       "voltage_kv": 25,
       "length_km": 2,
-      "thermal_limit_mw": 90,
+      "thermal_limit_mw": 140,
       "circuits": 2,
       "status": "online",
       "notes": "Critical facility. Airport has 20MW backup diesel but prefers grid supply."

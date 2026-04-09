@@ -80,15 +80,22 @@ Your score accumulates based on how long you hold frequency near nominal and how
 - Gen vs Load bar (bottom centre) real-time balance, green is surplus, red is deficit
 - Status panel (top left) time, season, score, speed controls
 - Alarms panel (top right) active alarms and HVDC flow, CLEAR to dismiss
+- Score breakdown (appears when hovering over score) details on your score
 
+**Settings**
+- Option to fullscreen the game
+- Adjustable grid frequency between 50hz and 60hz
+- Ability to adjust your music volume from 0 to 100
+- Option to prevent fast-paced music from playing
 ---
 
 ## Scoring
 
 Your score accumulates every second based on two factors:
 
-- **Frequency** 70% weight. Full points within ±0.1 Hz of nominal, reduced points in the warning band, zero points in emergency, no accumulation during collapse.
+- **Frequency** 50% weight. Full points within ±0.1 Hz of nominal, reduced points in the warning band, zero points in emergency, no accumulation during collapse.
 - **HVDC export** 30% weight. Full export earns full points. Import reduces your score. You can go negative.
+- **Battery usage** 20% weight. Full charging earns full points. Discharging reduces your score. You can go negative.
 
 There is no time limit. Your final score is shown on the game over screen when the grid collapses.
 
@@ -141,11 +148,16 @@ GridControllerSimulator/
 │   ├── simulationEngine.py
 │   ├── game_over.py
 │   ├── main_menu.py
+│   ├── settings.py
 │   ├── tutorial.py
 │   └── disclaimer.py
 └── assets/
     ├── grid_controller.ico
-    └── grid_controller.png
+    ├── grid_controller.png
+    ├── alert.ogg
+    ├── ambient1.ogg
+    ├── ambient2.ogg
+    └── ambient3.ogg
 ```
 
 The grid is fully data-driven. Every generator, substation, line, load, and event is defined in `oakridge_grid.json`. The simulation code does not hardcode any grid-specific values, adding a new generator or substation means editing the JSON, not the engine.
@@ -171,11 +183,16 @@ The simulation uses a DC power flow model (B-matrix, solved with numpy's linear 
 
 ---
 
+## Bug fixes
+- Line overload timers accumulate incorrectly under some conditions, cascade behaviour may be more aggressive than intended
+- Incorrect error handling leading to silent failures when calculating b_matrix
+- Fixed load on all lines defaulting to 0
+- Fixed isolated nodes continuing to receive or provide power
+
 ## Known Issues (Alpha)
 
 - Forced outages on some generators may not correctly transition to standby without manual intervention
 - The solar output model uses integer hours internally, a fix for smooth continuous output is pending
-- Line overload timers accumulate incorrectly under some conditions, cascade behaviour may be more aggressive than intended
 - Performance degrades slightly at very high zoom with many open info panels
 - No save/load system yet, each session starts fresh
 

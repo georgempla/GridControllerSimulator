@@ -136,6 +136,8 @@ class InfoPanel:
         if t == 'generation_nodes':return 80
         if t == 'storage_nodes': return 64
         if t == 'load_nodes': return 44
+        if t == 'hdvc': return 40
+        if t == '':return 30
         return 0
 
 
@@ -146,6 +148,8 @@ class InfoPanel:
         elif t == "storage_nodes": return self.storage_rows(raw)
         elif t == "substation_nodes": return self.sub_rows(raw)
         elif t == "load_nodes": return self.load_rows(raw)
+        elif t == '':
+            return self.line_rows(self.node)
         return []
 
     def gen_rows(self, raw):
@@ -182,7 +186,7 @@ class InfoPanel:
 
     def load_rows(self, raw):
         live = self.engine.loads.get(raw['id'])
-        status = 'SHED' if (live and live.shed_mw > 0) else 'ENERGISED'
+        status = 'DISCONNECTED' if (live and live.current_demand_mw == 0) else 'ENERGISED'
         demand = f"{live.current_demand_mw:.1f} MW" if live else 'N/A'
         shed = f"{live.shed_mw:.1f} MW" if (live and live.shed_mw > 0) else 'None'
         backup = raw.get('backup_generation_mw')
@@ -201,13 +205,37 @@ class InfoPanel:
                          f"{backup} MW ({raw.get('backup_type', 'N/A')}){on_bkp}"))
         return rows
     def sub_rows(self, raw):
+        s = self.engine.substations.get(raw.get('id'))
         return [
-            ("Status", raw.get('status', "N/A").upper()),
-            ("Primary", f"{raw.get('voltage_primary_kv', 'N/A')} kV"),
-            ("Secondary", f"{raw.get('voltage_secondary_kv', 'N/A')} kV"),
-            ("Xfmrs", f"{raw.get('transformer_count', "N/A")} x {raw.get("transformer_capacity_mva_each", "N/A")} MVA"),
-            ("N-1", 'YES' if raw.get('n_minus_1_capable') else 'NO ⚠'),
-            ('Busbar', raw.get('busbar_configuration', 'N/A').replace("_", " "))
+            ("Status", s.status.upper()),
+            ("Primary", f"{s.voltage_primary_kv} kV"),
+            ("Secondary", f"{s.voltage_secondary_kv} kV"),
+            ("Xfmrs", f"{s.transformer_count} x {s.transformer_capacity_mva_each} MVA"),
+            ("N-1", 'YES' if s.n_minus_1_capable else 'NO'),
+            ('Busbar', s.busbar_configuration.replace("_", " "))
+        ]
+    def get_node_name(self,id):
+        if id[:3] == 'GEN':
+            return self.engine.generators.get(id).name
+        elif id[:3] == 'STG':
+            return self.engine.storage.get(id).name
+        elif id[:3] == 'SUB':
+            if id == "SUB-009":
+                return "Oakridge-Southern Alaska HVDC Interconnect"
+            return self.engine.substations.get(id).name
+        elif id[:3] == 'LOA':
+            return self.engine.loads.get(id).name
+
+    def line_rows(self,raw):
+        line = self.engine.lines.get(raw.get('id'))
+        return [
+            ("Status", line.status.upper()),
+            ("From", f"{self.get_node_name(line.from_node)}"),
+            ("To", f"{self.get_node_name(line.to_node)}"),
+            ("Voltage", f"{raw.get('voltage_kv', "N/A")} kV"),
+            ("Thermal Limit",  f"{raw.get('thermal_limit_mw')} MW" ),
+            ("Load", f"{int(abs(line.flow_mw)/line.thermal_limit_mw*100)} %"),
+            ('Circuit', str(raw.get('circuits', 'N/A')))
         ]
 
     def _build_controls(self,px,py,update=False):
@@ -224,6 +252,30 @@ class InfoPanel:
             self._build_storage_controls(px,py,nid,update)
         elif t == 'load_nodes':
             self._build_load_controls(px,py,nid,raw,update)
+        elif t == '':
+            self._build_line_controls(px, py, self.node.get('id'), self.node, update)
+
+    def _build_line_controls(self, px, py, nid, raw, update):
+        pad = 8
+        bw = (self.w-pad*3)//2
+
+        live = self.engine.lines.get(nid)
+        is_online = live and live.status == 'online'
+        is_standby = live and live.status == 'tripped'
+        self.buttons.append(Button(
+            'Restore',
+            px+pad*2+bw, py+4, bw, 22,
+            BTN_GREEN if is_standby else BTN_DIM,
+            (lambda _id=nid: self.engine.restore_line(_id))
+            if is_standby else lambda: None
+        ))
+        self.buttons.append(Button(
+            'TRIP',
+            px + pad, py + 4, bw, 22,
+            BTN_RED if is_online else BTN_DIM,
+            (lambda _line=live: self.engine._trip_line(_line))
+            if is_online else lambda: None
+        ))
 
     def _build_gen_controls(self,px,py,nid,raw,update):
         pad = 8
@@ -233,7 +285,7 @@ class InfoPanel:
 
             self.text_inputs.append(TextInput(
                 px+pad,py+6,self.w-pad*2,22,
-                f"Set MW ({raw.get('min_ouput_mw',0)}-{raw.get('max_output_mw',0)})",
+                f"Set MW ({raw.get('min_output_mw',0)}-{raw.get('max_output_mw',0)})",
                 lambda mw,_id=nid:self.engine.set_generator_setpoint(_id,mw),self.font
             ))
         is_online = live and live.status == 'online'
@@ -347,18 +399,20 @@ class InfoPanel:
         ]
         row_h = 25+len(panel.rows)*18+8
         ctrl_h = 36
-        panel.h = row_h +ctrl_h
-        panel.x,panel.y = calculate_panel_pos(sx,sy,panel.w,panel.h,screen_w,screen_h)
-        panel.rect = pygame.Rect(panel.x,panel.y,panel.w,panel.h)
-        
         pad = 8
+        panel.x,panel.y = calculate_panel_pos(sx,sy,panel.w,row_h +ctrl_h,screen_w,screen_h)
+
         panel.text_inputs.append(TextInput(
-            panel.x + pad,panel.y+row_h+6,
-            panel.w-pad*2,22,
+            panel.x + pad, panel.y + row_h + 6,
+            panel.w - pad * 2, 22,
             f"MW + export / - import",
-            lambda mw:engine.set_hvdc_flow(mw),
+            lambda mw: engine.set_hvdc_flow(mw),
             font
         ))
+        panel.h = row_h +ctrl_h
+        panel.rect = pygame.Rect(panel.x,panel.y,panel.w,panel.h)
+        
+
         return panel
     def update_rows(self):
         if getattr(self,'_is_hvdc',False):
