@@ -23,7 +23,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon="assets/grid_controller.ico" --add-data "maps:maps" --add-data "utils;utils" --add-data "assets:assets" --name "GridControllerSimulator" main.py
+          pyinstaller --onefile --windowed --icon="assets/grid_controller.ico" --add-data "maps:maps" --add-data "utils:utils" --add-data "assets:assets" --name "GridControllerSimulator" main.py
 
 
       - name: Zip the .app
