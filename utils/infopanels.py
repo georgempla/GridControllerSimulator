@@ -407,8 +407,8 @@ class InfoPanel:
             'SHED LOAD',
             px+pad,py+8,bw,22,
             BTN_ORANGE if can_shed else BTN_DIM,
-            #(lambda _id=nid:self._shed_load(_id))
-            (lambda _id=nid: self._test_ship())
+            (lambda _id=nid:self._shed_load(_id))
+            #(lambda _id=nid: self._test_ship())
             if can_shed else lambda:None
         ))
         self.buttons.append(Button(
