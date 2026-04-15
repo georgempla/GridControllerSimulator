@@ -563,7 +563,7 @@
       "to_node": "SUB-006",
       "voltage_kv": 138,
       "length_km": 14,
-      "thermal_limit_mw": 280,
+      "thermal_limit_mw": 600,
       "impedance_pu": 0.028,
       "resistance_ohm_per_km": 0.18,
       "conductor_type": "ACSR",
@@ -711,7 +711,7 @@
       "to_node": "LOAD-004",
       "voltage_kv": 25,
       "length_km": 1.5,
-      "thermal_limit_mw": 40,
+      "thermal_limit_mw": 70,
       "circuits": 2,
       "status": "online",
       "notes": "Dedicated protected feeder. Never to be interrupted."
@@ -723,7 +723,7 @@
       "to_node": "LOAD-005",
       "voltage_kv": 25,
       "length_km": 3,
-      "thermal_limit_mw": 350,
+      "thermal_limit_mw": 400,
       "circuits": 2,
       "status": "online"
     },
@@ -756,7 +756,7 @@
       "to_node": "LOAD-008",
       "voltage_kv": 25,
       "length_km": 4,
-      "thermal_limit_mw": 200,
+      "thermal_limit_mw": 450,
       "circuits": 2,
       "status": "online"
     },
@@ -816,6 +816,30 @@
       "circuits": 1,
       "status": "online",
       "notes": "Bidirectional. Charges from grid and discharges to grid."
+    },
+    {
+      "id": "DL-014",
+      "name": "Control Center Feeder",
+      "from_node": "SUB-001",
+      "to_node": "CC-001",
+      "voltage_kv": 25,
+      "length_km": 2,
+      "thermal_limit_mw": 100,
+      "circuits": 2,
+      "status": "online",
+      "notes": "Provides the main control center with power"
+    },
+    {
+      "id": "DL-015",
+      "name": "Backup Control Center Feeder",
+      "from_node": "SUB-001",
+      "to_node": "CC-002",
+      "voltage_kv": 25,
+      "length_km": 2,
+      "thermal_limit_mw": 80,
+      "circuits": 2,
+      "status": "online",
+      "notes":"Provides the backup control center with power"
     }
   ],
 
@@ -1032,7 +1056,7 @@
     "control_center": {
       "id": "CC-001",
       "name": "Oakridge Energy Management Center",
-      "position": { "x": 50, "y": 50 },
+      "position": { "x": 55, "y": 50 },
       "type": "EMS_SCADA",
       "systems": [
         "Energy Management System (EMS)",
@@ -1043,14 +1067,17 @@
         "Short-Term Load Forecasting"
       ],
       "scan_rate_seconds": 4,
+      "demand_mw": 90.0,
+      "activation_time_minutes": 60,
       "backup_control_center": "CC-002"
     },
     "backup_control_center": {
       "id": "CC-002",
       "name": "Oakridge Backup Control Center",
-      "position": { "x": 45, "y": 42 },
+      "position": { "x": 50, "y": 42 },
       "type": "backup_EMS",
       "activation_time_minutes": 15,
+      "demand_mw": 60.0,
       "notes": "Hot standby. Takes over if primary CC-001 is lost."
     },
     "pmu_nodes": [

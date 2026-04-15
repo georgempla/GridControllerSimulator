@@ -46,6 +46,36 @@ def load_grid(filepath):
                 'y':pos['y'],
                 'raw': node
             })
+    node = data['scada_and_monitoring']['control_center']
+    pos = node.get('position')
+    if pos is None:
+        return nodes,lines,data
+    subtype = node.get('type') or node.get("subtype")
+
+
+    nodes.append({
+        'id': node['id'],
+        'name': node['name'],
+        'type': subtype,
+        'x': pos['x'],
+        'y': pos['y'],
+        'raw': node
+    })
+    if node.get('backup_control_center'):
+        node = data['scada_and_monitoring']['backup_control_center']
+        pos = node.get('position')
+        if pos is None:
+            return nodes, lines, data
+        subtype = node.get('type') or node.get("subtype")
+
+        nodes.append({
+            'id': node['id'],
+            'name': node['name'],
+            'type': subtype,
+            'x': pos['x'],
+            'y': pos['y'],
+            'raw': node
+        })
     lines = (data['transmission_lines'] + 
              data['distribution_lines'])
     return nodes,lines,data
@@ -60,7 +90,6 @@ class MapRenderer:
         self.font = font
         self.font_bold = font_bold
         self.nodes = nodes
-        self.lines = lines
         self.data = data
         self.camera = camera
         self.panels = []
@@ -70,6 +99,8 @@ class MapRenderer:
         self.last_tick = time.time()-0.1
         self.hud_fonts = build_hud_fonts()
         self.SimulationEngine = SimulationEngine(data,freq,lines)
+        self.lines = []
+
         self.node_map = {n['id']: n for n in nodes}
         self.tutorial = tutorial
         self.tick_sim = True
@@ -80,7 +111,7 @@ class MapRenderer:
             self.tutorial.set_engine(self.SimulationEngine)
             self.tutorial.node_map = self.node_map
     def draw(self,surface):
-
+        self.lines = self.SimulationEngine.lines.values()
         self.draw_lines(surface)
         self.draw_nodes(surface)
         for p in self.panels:
@@ -97,10 +128,11 @@ class MapRenderer:
             for p in self.panels:
                 p.update_rows()
             self.last_tick = time.time()
+        if not self.SimulationEngine.control_available:
+            self.panels = []
         self.rects = draw_hud(surface, self.hud_fonts, self.SimulationEngine.hud_data(),self.screen_w, self.screen_h,self.freq,self.score_detail_show)
 
         if self.rects['score_rect'].collidepoint(pygame.mouse.get_pos()):
-            print("touch")
             self.score_detail_show = True
         else:
             self.score_detail_show = False
@@ -115,24 +147,29 @@ class MapRenderer:
             138: {'color': (180,180,180), 'width':2},
             25: {'color':(80,80,80), 'width':1}
         }
+        TRIPPED_LINE_STYLES = {
+            500: {'color': (255, 80, 80),  'width': 3},
+            138: {'color': (180, 60, 60),  'width': 2},
+            25:  {'color': (80,  30, 30),  'width': 1},
+        }
         from collections import defaultdict
         pair_count = defaultdict(list)
         for line in self.lines:
-            key = tuple(sorted([line['from_node'], line['to_node']]))
+            key = tuple(sorted([line.from_node, line.to_node]))
             pair_count[key].append(line)
         drawn_pair_index = defaultdict(int)
         
         for line in self.lines:
-            from_node = self.node_map.get(line["from_node"])
-            to_node = self.node_map.get(line['to_node'])
+            from_node = self.node_map.get(line.from_node)
+            to_node = self.node_map.get(line.to_node)
             if not from_node or not to_node:
                 continue
 
             sx1, sy1 = self.camera.world_to_screen(from_node['x'], from_node['y'])
             sx2, sy2 = self.camera.world_to_screen(to_node['x'], to_node['y'])
             
-            style = LINE_STYLES.get(line['voltage_kv'], LINE_STYLES[25])
-            key = tuple(sorted([line['from_node'],line['to_node']]))
+            style = LINE_STYLES.get(line.voltage_kv, LINE_STYLES[25]) if line.status == "online" else TRIPPED_LINE_STYLES.get(line.voltage_kv, LINE_STYLES[25])
+            key = tuple(sorted([line.from_node,line.to_node]))
             siblings = pair_count[key]
             if len(siblings)>1:
                 idx = drawn_pair_index[key]
@@ -142,10 +179,10 @@ class MapRenderer:
                 dx = sx2-sx1
                 dy = sy2-sy1
                 length = max(1,math.hypot(dx,dy))
-                px,py = -dx/length,dx/length
+                px,py = -dy/length,dx/length
                 offset = (idx-(n-1)/2)*gap
                 sx1 = int(sx1+px*offset)
-                sy1 = int(sy1+px*offset)
+                sy1 = int(sy1+py*offset)
                 sx2 = int(sx2+px*offset)
                 sy2 = int(sy2+py*offset)
             pygame.draw.line(surface,style['color'], (sx1,sy1),(sx2,sy2),style['width'])
@@ -167,24 +204,22 @@ class MapRenderer:
         from collections import defaultdict
         pair_count = defaultdict(list)
         for line in self.lines:
-            key = tuple(sorted([line['from_node'],line['to_node']]))
+            key = tuple(sorted([line.from_node,line.to_node]))
             pair_count[key].append(line)
         best_line = None
         best_dist = float('inf')
         pair_index = defaultdict(int)
 
         for line in self.lines:
-            from_node = self.node_map.get(line['from_node'])
-            to_node = self.node_map.get(line['to_node'])
+            from_node = self.node_map.get(line.from_node)
+            to_node = self.node_map.get(line.to_node)
             if not from_node or not to_node:
                 continue
 
             x1,y1 = self.camera.world_to_screen(from_node['x'],from_node['y'])
             x2,y2 = self.camera.world_to_screen(to_node['x'],to_node['y'])
-
-            key = tuple(sorted([line['from_node'],line['to_node']]))
+            key = tuple(sorted([line.from_node,line.to_node]))
             siblings = pair_count[key]
-
             if len(siblings)>1:
                 idx = pair_index[key]
                 pair_index[key] +=1
@@ -242,6 +277,8 @@ class MapRenderer:
                 if rect.collidepoint(event.pos):
                     self.SimulationEngine.time_multiplier = speed
                     return True
+            if not self.SimulationEngine.control_available:
+                return
             clicked = self.get_clicked_node(event.pos)
 
             if clicked:

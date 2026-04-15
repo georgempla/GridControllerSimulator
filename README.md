@@ -33,12 +33,21 @@ The map covers a fictional Alaskan city with a diverse generation mix and severa
 **Interconnects**
 - `IC-001` HVDC link to the Southern Alaska grid. Up to 800 MW export, 600 MW import. Ramps at 50 MW/min. You are contractually obligated to export, failing to deliver costs you.
 
+**Control**
+- `CC-001` Main Control Center, designed to provide the controller with all the tools needed for their job. 90MW power draw and a startup time of 60 minutes makes any failures extremely consequential
+- `CC-002` Backup Control Center, designed to startup quickly(within 15 minutes) in case the main center fails, it has a reduced draw of 60MW and limits the operator on their actions
+
 **Known vulnerabilities (by design)**
 - `SUB-005` South Residential Substation has no N-1 redundancy. One transformer failure blacks out 27,000 households.
 - `PIPE-001` is a single natural gas pipeline feeding all three gas generators. One rupture removes 880 MW simultaneously.
 - `TL-011` Downtown-South 138 kV line is single-circuit and aging. A fault here isolates the southern suburbs.
 - The wind collection line `TL-008` is single-circuit. Loss curtails all wind generation instantly.
 
+**Random Events**
+- A large vessel: You are notified of a ship that will dock within 2 hours on the port `LOAD-008`, after it docks power draw is marginally increased by at least 200MW for up to 8 hours, at which point the vessel will depart with conditions returning to normal
+- A cyberattack: Foreign state actors have hijacked the control of your network and will randomly trip lines every 5-7 minutes, in order to defeat them you need to switch control over to the backup control center at which point the IT team will resolve the attack within the hour (55-65 minutes)
+- A random winter trip: The heavy snow in Alaska often causes trouble on the local infrastructure especially on sensitive exposed equipment. Lines can trip due to snow buildup and should be restored immediately.
+- The whiteout is upon us: A large winter storm has hit Oakridge, it is recommended everyone stays inside. Subsequently power draw is increased by 10% and line trip risk due to snow build up has risen by up to 5 times
 ---
 
 ## Frequency Governs Everything
@@ -188,6 +197,7 @@ The simulation uses a DC power flow model (B-matrix, solved with numpy's linear 
 - Incorrect error handling leading to silent failures when calculating b_matrix
 - Fixed load on all lines defaulting to 0
 - Fixed isolated nodes continuing to receive or provide power
+- Fixed Load/Generation HUD bar incorrectly subtracting the interconnect MW from the total generation
 
 ## Known Issues (Alpha)
 
@@ -195,4 +205,6 @@ The simulation uses a DC power flow model (B-matrix, solved with numpy's linear 
 - The solar output model uses integer hours internally, a fix for smooth continuous output is pending
 - Performance degrades slightly at very high zoom with many open info panels
 - No save/load system yet, each session starts fresh
+
+
 

@@ -1,3 +1,4 @@
+from email.quoprimime import body_check
 from random import gauss
 
 import pygame
@@ -255,8 +256,23 @@ Plan import requests before you actually need them.
             close='STG-001',
             pan=[-638,0],
         ),
-
         TutorialStep(
+          title="Control Centers",
+        body="""
+You excert your control over the grid through 2 centers
+The main starts as operational and the backup as standby\n
+If the main center fails the backup will startup
+While no control centers are operational you lose control
+of the grid\n
+If you lose both at the same time your game is over
+You can manually transfer control using the 2 buttons       
+"""
+        ,
+        highlight= PanelHighlight('CC-001', NodeHighlight('CC-001', radius=40)),
+        pan=[-385,-67],
+        close="SUB-009",
+        ),
+    TutorialStep(
             title="Load Priority Classes",
             body="""
 Not all customers are equal. When shedding is needed,
@@ -268,7 +284,7 @@ Class 0  - Hospital, Airport (NEVER shed)\n
 Losing a Class 0 load is always a failure condition
 regardless of frequency. Protect them above all else.
 """,
-            close='SUB-009',
+            close='CC-001',
             pan=[230, 0],
         ),
 

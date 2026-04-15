@@ -218,7 +218,7 @@ class Settings:
         self.calm_rect.draw(surface, self.font_small, self.font_label)
         self._draw_bottom_btn(surface, self.back_rect, "BACK", False, mouse)
 
-        ver = self.font_small.render("v0.1.1-alpha", True, (35, 45, 58))
+        ver = self.font_small.render("v0.1.2-alpha", True, (35, 45, 58))
         surface.blit(ver, (self.screen_w - ver.get_width() - 8, self.screen_h - ver.get_height() - 6))
 
     def _draw_bottom_btn(self, surface, rect, label, locked, mouse, col_normal=(25, 40, 65),

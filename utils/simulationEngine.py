@@ -1,4 +1,6 @@
 from functools import total_ordering
+from sys import orig_argv
+from time import process_time
 
 import numpy as np
 import random
@@ -6,7 +8,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-
+from pygame.draw import lines
 from pygame.event import set_keyboard_grab
 
 INERTIA_CONSTANTS = {
@@ -48,6 +50,7 @@ class GeneratorState:
     operator_setpoint_mw:float=0.0
     startup_timer: float = 0.0
     outage_timer: float = 0.0
+    startup_at:int = 0
 
     @property
     def inertia_constant(self):
@@ -87,6 +90,23 @@ class LoadState:
     shed_mw: float = 0.0 #amount currently shed by UFLS or controller
     on_backup: bool = False
     interruption_cooldown: float=0.0
+
+@dataclass
+class ControlCenter:
+    id:str
+    name:str
+    node_id:str
+    demand_mw:float
+    isbackup:bool
+    activation_time:int
+    activate_at:int=0
+    status:str=field(init=False)
+    current_demand:float=10.0
+
+    def __post_init__(self):
+        self.status = "standby" if self.isbackup else "operational"
+
+
 
 @dataclass
 class StorageState:
@@ -164,6 +184,19 @@ class SimulationEngine:
         self.score = 0.0
         self._score_display = 0
         self.F_NOMINAL = freq
+        self.test_ship = False
+        self.ship_event = False
+        self.ship_time_min = 0
+        self.ship_arrived = False
+        self.control_available = True
+        self.force_switch_started = False
+        self.cyberattack = False
+        self.cyberattack_cooldown = 0
+        self.cyberattack_end_at = 0
+        self.cyberattack_end = 0
+        self.random_line_trip_rate = 1
+        self.winter_storm = False
+        self.winter_storm_countdown = 0
 
         self.COLLAPSE_HZ = freq-1.6
 
@@ -173,13 +206,14 @@ class SimulationEngine:
         self.storage: Dict[str, StorageState] = {}
         self.substations: Dict[str, SubstationState] = {}
         self.node_ids: List[str] = []
+        self.online_lines: List[LineState] = []
 
         self._build_state(grid_data)
         self._build_bus_index()
         self._build_b_matrix()
         self.reachable = self._get_reachable_buses()
 
-        self.freq_score, self.export_score = 0,0
+        self.freq_score, self.export_score, self.battery_score = 0,0,0
 
         for g in self.generators.values():
             if g.status == 'online':
@@ -208,7 +242,7 @@ class SimulationEngine:
                 installed_capacity_mw=g['installed_capacity_mw'],
                 min_output_mw=g.get('min_output_mw', 0),
                 max_output_mw=g['max_output_mw'],
-                ramp_rate_mw_per_min = g.get('ramp_rate_mw_per_min', 5)*60,
+                ramp_rate_mw_per_min = g.get('ramp_rate_mw_per_min', 5)*3,
                 startup_time_minutes= g.get('startup_time_minutes', 60),
                 fuel_type=g.get('fuel_type', 'unknown'),
                 efficiency_percent=g.get('efficiency_percent',40),
@@ -293,6 +327,25 @@ class SimulationEngine:
                 busbar_configuration=sub['busbar_configuration']
             )
             self.substations[sub['id']] =s
+        control_node = data["scada_and_monitoring"]["control_center"]
+        self.control_center = ControlCenter(
+            id=control_node["id"],
+            name=control_node["name"],
+            node_id=control_node["id"],
+            demand_mw=control_node["demand_mw"],
+            isbackup=False,
+            activation_time=control_node["activation_time_minutes"]
+        )
+        backup_control_center = data["scada_and_monitoring"].get("backup_control_center")
+        if backup_control_center:
+            self.backup_control_center = ControlCenter(
+                id=backup_control_center["id"],
+                name=backup_control_center["name"],
+                node_id=backup_control_center["id"],
+                demand_mw=backup_control_center["demand_mw"],
+                isbackup=True,
+                activation_time=backup_control_center["activation_time_minutes"]
+            )
     def _build_bus_index(self):
         ids = set()
         for sub in self.data['substation_nodes']:
@@ -303,6 +356,9 @@ class SimulationEngine:
             ids.add(sid)
         for lid in self.loads:
             ids.add(lid)
+        ids.add("CC-001")
+        if self.backup_control_center:
+            ids.add("CC-002")
 
 
         self.node_ids = sorted(ids)
@@ -341,8 +397,9 @@ class SimulationEngine:
         queue = [slack_id]
 
         online_lines = [l for l in self.lines.values() if l.status=='online']
-
+        self.online_lines = online_lines
         adj = {nid:[] for nid in self.node_ids}
+
         for line in self.lines.values():
             if line.status == 'online':
                 if line.from_node in adj and line.to_node in adj:
@@ -392,6 +449,9 @@ class SimulationEngine:
         if hvdc_idx is not None and 'SUB-009' in reachable:
             P[hvdc_idx] -= self.hvdc_flow_mw
         #print(f"[DEBUG] P[SUB-009] after inject: {P[hvdc_idx] if hvdc_idx is not None else 'None'}")
+        P[self.bus_index.get("CC-001")] += self.control_center.current_demand
+        if self.backup_control_center:
+            P[self.bus_index.get("CC-002")] += self.backup_control_center.current_demand
         mask = [i for i in range(self.n_buses) if i != slack_idx]
         B_red = self.B_full[np.ix_(mask,mask)]
         P_red = P[mask]
@@ -438,6 +498,66 @@ class SimulationEngine:
         if day <172: return 'spring'
         if day <264: return 'summer'
         return 'autumn'
+    def _tick_control(self):
+        if self.control_center:
+            if self.control_center.status == "operational":
+                self.control_available = True
+                if self.control_center.id not in self.reachable:
+                    self.control_center.status = "offline"
+                self.control_center.current_demand = self.control_center.demand_mw
+            elif self.control_center.status == "standby":
+                self.control_center.current_demand = 10.0
+                if self.backup_control_center.status != "operational":
+                    self.control_available = False
+                if self.control_center.id not in self.reachable:
+                    self.control_center.status = "offline"
+                else:
+                    if self.control_center.activate_at == 0 and not self.force_switch_started:
+                        self.control_center.activate_at = int((self.sim_time_min+self.control_center.activation_time)%1440)
+                    elif int(self.sim_time_min) in range(self.control_center.activate_at,self.control_center.activate_at+10):
+                        self.control_center.activate_at = 0
+                        self.control_center.status = "operational"
+            elif self.control_center.status == "offline":
+                if self.backup_control_center.status != "operational":
+                    self.control_available = False
+                self.control_center.current_demand = 0.0
+                self.control_center.activate_at = 0
+                if self.control_center.id in self.reachable:
+                    self.control_center.status = "standby"
+            if self.backup_control_center:
+                if self.backup_control_center.status == "operational":
+                    self.backup_control_center.current_demand = self.backup_control_center.demand_mw
+                    self.control_available = True
+                    if self.backup_control_center.id not in self.reachable:
+                        self.backup_control_center.status = "offline"
+                    elif self.control_center.status == "operational" and not self.force_switch_started:
+                        self.backup_control_center.status = "standby"
+                elif self.backup_control_center.status == "standby":
+                    self.backup_control_center.current_demand = 10.0
+                    if self.backup_control_center.id not in self.reachable:
+                        self.backup_control_center.status = "offline"
+                    elif self.control_center.status == "operational" and not self.force_switch_started:
+                        self.backup_control_center.activate_at = 0
+                    elif self.control_center.status == "offline" or self.force_switch_started:
+                        if self.control_center.status == "offline":
+                            self.control_available = False
+                        if self.backup_control_center.activate_at == 0:
+                            self.backup_control_center.activate_at = int((self.sim_time_min+self.backup_control_center.activation_time)%1440)
+                        elif int(self.sim_time_min) in range(self.backup_control_center.activate_at,self.backup_control_center.activate_at+10):
+                            self.backup_control_center.activate_at = 0
+                            self.backup_control_center.status = "operational"
+                else:
+                    self.backup_control_center.current_demand =0.0
+                    self.backup_control_center.activate_at = 0
+                    if self.backup_control_center.id in self.reachable:
+                        self.backup_control_center.status = "standby"
+                    if self.control_center.status == "offline":
+                        self.control_available = False
+                        self.game_over = True
+                        self.game_over_reason = "All control centers have been lost"
+
+
+
 
     def _tick_demand(self):
         profiles = self.data['demand_profiles']
@@ -454,6 +574,7 @@ class SimulationEngine:
                 load.current_demand_mw = 0.0
                 continue
 
+
             profile = profiles.get(load.demand_profile, profiles['flat'])
             factors = profile['hourly_factors']
             hourly_factor = (factors[current_hour]*(1.0-hour_progress)+ factors[next_hour]*hour_progress)
@@ -467,6 +588,10 @@ class SimulationEngine:
             noise = random.gauss(0,0.005)
             load.current_demand_mw = load.peak_demand_mw * hourly_factor * seasonal*(1+noise)
             load.current_demand_mw = max(0.0, load.current_demand_mw)
+            if load.id == "LOAD-008" and self.ship_arrived:
+                load.current_demand_mw += 250
+            if self.winter_storm:
+                load.current_demand_mw *=1.1
             if load.interruption_cooldown >0:
                 load.interruption_cooldown -=1/60.0
     def _tick_weather(self,dt_seconds):
@@ -500,7 +625,7 @@ class SimulationEngine:
         daylight_frac = math.sin(math.pi*(hour-sunrise)/(sunset-sunrise))
         return (g.installed_capacity_mw*derating*daylight_frac*(1.0-self.cloud_cover*0.8))
     def _tick_dispatch(self, dt_seconds):
-        dt_min = dt_seconds/60.0
+        dt_min = dt_seconds/5.0
         season = self.current_season
         for g in self.generators.values():
             if g.node_id not in self.reachable:
@@ -521,6 +646,7 @@ class SimulationEngine:
                 g.startup_timer -= dt_min
                 if g.startup_timer<=0:
                     g.status = 'online'
+                    g.startup_at = 0
                     self._add_alarm(f"{g.name} is now online", 'info')
             if g.status == 'tripping':
                 g.current_output_mw -= g.ramp_rate_mw_per_min*dt_min*5
@@ -663,11 +789,14 @@ class SimulationEngine:
             line.overload_timer = 0.0
             self._build_b_matrix()
             self._add_alarm(f"{line.name} restored",'info')
-    def _trip_line(self, line: LineState):
+    def _trip_line(self, line: LineState, alert=None):
         line.status = 'tripped'
         line.flow_mw = 0.0
         line.overload_timer = 0.0
-        self._add_alarm(f"LINE TRIP: {line.name}", 'critical')
+        if alert:
+            self._add_alarm(alert,'critical')
+        else:
+            self._add_alarm(f"LINE TRIP: {line.name}", 'critical')
         self._build_b_matrix()
     def _check_cascade(self):
         changed = True
@@ -730,12 +859,80 @@ class SimulationEngine:
             self.game_over=True
             self.game_over_reason = f"Grid collapse - frequency below {self.F_NOMINAL-1.6} Hz"
     def _tick_events(self, dt_seconds):
-        ticks_per_hour = 3600/dt_seconds
+        ticks_per_hour = self.time_multiplier
+        dt_min = dt_seconds/5.0
+        if self.cyberattack:
+            self.cyberattack_cooldown-=dt_min
+            self.cyberattack_end-=dt_min
+        rate = 5
+        if self.ship_event and int(self.sim_time_min) in range(int(self.ship_time_min),int(self.ship_time_min)+20):
+            if not self.ship_arrived:
+                self.ship_arrived = True
+                self.ship_time_min += 400
+                self._add_alarm(
+                    f"The ship has docked at the port and will depart at precicely {(self.current_hour + 8) % 24}:{int(self.sim_time_min % 60):02d} . In the meantime power drawn has increased",
+                    "info")
+            else:
+                self.ship_arrived = False
+                self.ship_event = False
+
+                self._add_alarm(
+                    f"The ship has departed. No additional power will be drawn",
+                    "info")
+        if (random.randint(0,int(8760/ticks_per_hour))<rate and not self.ship_event):
+            self.ship_event = True
+            self.test_ship = False
+
+            self.ship_time_min = self.sim_time_min + 120
+            if self.ship_time_min >= 1440:
+                self.ship_time_min -= 1440
+
+            self._add_alarm(f"A large ship will be docking at the port at precicely {(self.current_hour+2)%24}:{int(self.sim_time_min%60):02d}","info")
+        if random.randint(0,int(8760/ticks_per_hour))<0.2:
+            self.cyberattack = True
+            self._add_alarm("A cyberattack by foreign actors is in progress, random line will be tripped, switch to backup control to resolve",'critical')
+        if self.cyberattack :
+            if self.control_center.status == "operational":
+                self.cyberattack_ending = False
+                if self.cyberattack_cooldown<=0:
+                    line = random.choice(self.online_lines)
+                    self._trip_line(line)
+                    self.cyberattack_cooldown = random.randint(5,15)
+            else:
+
+                if not self.cyberattack_ending:
+                    self.cyberattack_end = random.randint(55,65)
+                    self.cyberattack_end_at = int((self.cyberattack_end+self.sim_time_min)%1440)
+                    self.cyberattack_ending = True
+                if self.cyberattack_end<=0:
+                    for i,(text,sev,time) in enumerate(self.alarms):
+                        if text == "A cyberattack by foreign actors is in progress, random line will be tripped, switch to backup control to resolve":
+                            self.alarms.pop(i)
+                        self._add_alarm("The cyberattack has ended all abnormal behaviour has stopped",'info')
+                        self.cyberattack = False
+                        self.cyberattack_ending = False
+                        self.test_ship = False
+        if (random.randint(1,int(8760/ticks_per_hour))<self.random_line_trip_rate and self.current_season == "winter"):
+            line = random.choice(self.online_lines)
+            self._trip_line(line,f"Line {line.name} tripped due to excess snow build up, please restore immidiently")
+            self.test_ship = False
+        if (random.randint(1,int(8760/ticks_per_hour))<1 or self.test_ship) and not self.winter_storm:
+            self._add_alarm("The Winter Storm (Whiteout) has arrived, power usage will be increased, snow buildup on power lines has increased",'critical')
+            self.winter_storm= True
+            self.winter_storm_countdown = int(self.sim_time_min-1)
+            self.random_line_trip_rate = 5
+        if self.winter_storm:
+            self.winter_storm_countdown -= dt_min
+            if self.winter_storm_countdown<=0:
+                self._add_alarm("Winter storm (whiteout) has passed all negative effects have been resolved") #Glory to New London, hail the captain/steward, we will embrace the frost, turn the wheels of progress and uphold reason and fight for merit for we are the proteans and with our vision we will save humanity! (I might be going insane from the sleep deprevation, thankfully noone will ever see this comment :), for anyone who didn't get it it's a Frostpunk refrence)
+                self.random_line_trip_rate = 1
+                self.winter_storm=False
+
         for g in self.generators.values():
             if g.status != 'online':
                 continue
-            rate = g.forced_outage_rate/(8760*ticks_per_hour)
-            if random.random()<rate:
+            rate = g.forced_outage_rate*self.time_multiplier/(8760*ticks_per_hour)
+            if random.randint(0,int(8760*ticks_per_hour))/(8760*ticks_per_hour)<rate:
                 g.status = 'tripping'
                 g.setpoint_mw = 0.0
                 g.outage_timer = random.uniform(240,2880)
@@ -748,7 +945,15 @@ class SimulationEngine:
         self.alarms.append({'text':text,'severity':severity,'time':self.sim_time_min})
         if len(self.alarms) >50:
             self.alarms = self.alarms[-50:]
-            
+    def _init_control_switch(self,toggle):
+        if toggle:
+            self.force_switch_started =False
+
+        else:
+            self.force_switch_started =True
+            self.backup_control_center.activate_at = int((self.sim_time_min+self.backup_control_center.activation_time)%1440)
+    def _swich_control(self):
+        self.control_center.status = "standby"
     def _tick_score(self,dt_seconds):
         hz_error = abs(self.frequency_hz-self.F_NOMINAL)
         if hz_error<0.1:
@@ -783,11 +988,12 @@ class SimulationEngine:
         if g.status == 'standby' and mw>0:
             g.status = 'starting'
             g.startup_timer = g.startup_time_minutes
+            g.startup_at = int((self.sim_time_min+g.startup_time_minutes)%1440)
             g.operator_setpoint_mw = mw
             self._add_alarm(f"{g.name} starting up",'info')
         elif g.status == 'online':
-            g.setpoint_mw = mw
-            g.operator_setpoint_mw = mw
+            g.setpoint_mw = min(mw,g.max_output_mw)
+            g.operator_setpoint_mw = min(mw,g.max_output_mw)
 
     def trip_generator(self, gen_id:str):
         g = self.generators.get(gen_id)
@@ -836,6 +1042,7 @@ class SimulationEngine:
         self._tick_ufls()
         self._tick_events(sim_dt)
         self._tick_score(sim_dt)
+        self._tick_control()
 
     def hud_data(self) -> dict:
         total_gen = sum(
@@ -855,8 +1062,9 @@ class SimulationEngine:
         if self.hvdc_flow_mw >=0:
             total_load += self.hvdc_flow_mw
         else:
-            total_gen += self.hvdc_flow_mw
-        return { 
+            total_gen -= self.hvdc_flow_mw
+        return {
+            "control_available":self.control_available,
             'hz':self.frequency_hz,
             'gen_mw':total_gen,
             'load_mw':total_load,

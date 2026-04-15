@@ -12,7 +12,7 @@ BTN_HOV = (45, 85, 150)
 
 LINES = [
     ("GRID CONTROLLER SIMULATOR", GOLD, 'large'),
-    ("Early Access Alpha - v0.1.1", DIM, 'med'),
+    ("Early Access Alpha - v0.1.2", DIM, 'med'),
     ("", None, 'gap'),
     ("This software is unfinished and under active development.", TEXT, 'small'),
     ("You will encounter bugs, missing features, and placeholder content.", TEXT, 'small'),

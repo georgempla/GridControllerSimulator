@@ -1,5 +1,6 @@
 
 import pygame
+from pefile import retrieve_flags
 from pygame.draw import lines
 
 
@@ -111,16 +112,20 @@ class InfoPanel:
     def __init__(self, node, sx,sy, screen_w, screen_h,font,bold_font,engine):
         self.font_bold = bold_font
         self.font = font
-        self.node = node
+        if type(node) == dict:
+            self.node = node
+        else:
+            self.node = {"name":node.name,"id":node.id}
         self.engine = engine
         self.screen_w = screen_w
         self.screen_h = screen_h
         self.w = self.PANEL_W
+        self.update_toggle = False
 
         self.buttons:list[Button] = []
         self.text_inputs:list[TextInput]=[]
 
-        self.rows = self.build_rows(node)
+        self.rows = self.build_rows(self.node)
         self._layout(sx,sy)
 
     def _layout(self,sx,sy):
@@ -137,6 +142,7 @@ class InfoPanel:
         if t == 'storage_nodes': return 64
         if t == 'load_nodes': return 44
         if t == 'hdvc': return 40
+        if t == 'EMS_SCADA': return 38
         if t == '':return 30
         return 0
 
@@ -148,13 +154,14 @@ class InfoPanel:
         elif t == "storage_nodes": return self.storage_rows(raw)
         elif t == "substation_nodes": return self.sub_rows(raw)
         elif t == "load_nodes": return self.load_rows(raw)
+        elif t == "EMS_SCADA" or t=="backup_EMS": return self.control_rows(raw)
         elif t == '':
             return self.line_rows(self.node)
         return []
 
     def gen_rows(self, raw):
         live = self.engine.generators.get(raw['id'])
-        return [
+        rows= [
             ('Status', (live.status.upper() if live else raw.get('status', 'N/A').upper())),
             ('Output', f"{live.current_output_mw:.1f} MW" if live else 'N/A'),
             ('Setpoint', f"{live.setpoint_mw:.1f} MW" if live else 'N/A'),
@@ -165,7 +172,11 @@ class InfoPanel:
             ('Carbon', f"{raw.get('carbon_kg_per_mwh', 'N/A')} kg/MWh"),
             ('Operator', raw.get('operator', 'N/A')),
         ]
-
+        if live.startup_at !=0:
+            rows.append(('Startup at',f"{live.startup_at//60}:{live.startup_at%60:02d}"))
+            if self.update_toggle:
+                self.update_toggle = False
+        return rows
     def storage_rows(self, raw):
         live = self.engine.storage.get(raw['id'])
         soc = f"{live.soc_percent:.1f}%" if live else f"{raw.get('state_of_charge_percent', 'N/A')}%"
@@ -225,6 +236,10 @@ class InfoPanel:
             return self.engine.substations.get(id).name
         elif id[:3] == 'LOA':
             return self.engine.loads.get(id).name
+        elif id=='CC-001':
+            return self.engine.control_center.name
+        elif id=='CC-002':
+            return self.engine.backup_control_center.name
 
     def line_rows(self,raw):
         line = self.engine.lines.get(raw.get('id'))
@@ -232,15 +247,36 @@ class InfoPanel:
             ("Status", line.status.upper()),
             ("From", f"{self.get_node_name(line.from_node)}"),
             ("To", f"{self.get_node_name(line.to_node)}"),
-            ("Voltage", f"{raw.get('voltage_kv', "N/A")} kV"),
-            ("Thermal Limit",  f"{raw.get('thermal_limit_mw')} MW" ),
+            ("Voltage", f"{line.voltage_kv} kV"),
+            ("Thermal Limit",  f"{line.thermal_limit_mw} MW" ),
             ("Load", f"{int(abs(line.flow_mw)/line.thermal_limit_mw*100)} %"),
-            ('Circuit', str(raw.get('circuits', 'N/A')))
+            ('Circuit', str(line.circuits))
         ]
+    def control_rows(self,raw):
+        main = False
+        if raw.get("type") == "EMS_SCADA":
+            control_center = self.engine.control_center
+            main  = True
+        elif raw.get("type") == "backup_EMS":
+            control_center = self.engine.backup_control_center
+        rows = [
+            ("Status",control_center.status.upper()),
+            ("Current Draw", f"{control_center.current_demand} MW"),
+            ("Operational Draw",f"{control_center.demand_mw} MW"),
+            ("Startup time",f"{control_center.activation_time} Minutes")
+        ]
+        if control_center.activate_at !=0:
+            rows.append(("Activation at", f"{control_center.activate_at//60}:{int(control_center.activate_at%60):02d}"))
+        if main:
+            rows.append(("Backup Control",self.engine.backup_control_center.name))
+        elif self.engine.cyberattack and control_center.status == "operational":
+            rows.append(("Cyberattack","Active"))
+            rows.append(("End at",f"{self.engine.cyberattack_end_at//60}:{self.engine.cyberattack_end_at%60:02d}"))
+        return rows
 
     def _build_controls(self,px,py,update=False):
         self.buttons.clear()
-        if not update:
+        if not update or not self.update_toggle:
             self.text_inputs.clear()
         t = self.node.get('type','')
         raw = self.node.get('raw',{})
@@ -252,6 +288,8 @@ class InfoPanel:
             self._build_storage_controls(px,py,nid,update)
         elif t == 'load_nodes':
             self._build_load_controls(px,py,nid,raw,update)
+        elif t == 'EMS_SCADA':
+            self._build_control_controls(px,py,nid,raw)
         elif t == '':
             self._build_line_controls(px, py, self.node.get('id'), self.node, update)
 
@@ -276,18 +314,34 @@ class InfoPanel:
             (lambda _line=live: self.engine._trip_line(_line))
             if is_online else lambda: None
         ))
-
+    def _build_control_controls(self,px,py,nid,raw):
+        pad =8
+        bw = (self.w-pad*3)//2
+        control_center = self.engine.control_center
+        self.buttons.append(Button(
+            "Start up",
+            px+pad,py+4,bw,22,
+            BTN_GREEN if (control_center.status == "operational" and self.engine.backup_control_center.activate_at ==0 and self.engine.backup_control_center.status != "operational") or (control_center.status=="standby" and self.engine.force_switch_started) else BTN_DIM,
+            (lambda : self.engine._init_control_switch(control_center.status=="standby" and self.engine.force_switch_started)) if (control_center.status == "operational" and self.engine.backup_control_center.activate_at ==0 and self.engine.backup_control_center.status != "operational") or (control_center.status=="standby" and self.engine.force_switch_started)else lambda: None
+        ))
+        self.buttons.append(Button(
+            "Transfer",
+            px+pad*2+bw,py+4,bw,22,
+            BTN_ORANGE if control_center.status == "operational" and self.engine.backup_control_center.status == "operational" else BTN_DIM,
+            (lambda: self.engine._swich_control() if control_center.status == "operational" and self.engine.backup_control_center.status == "operational" else lambda: None)
+        ))
     def _build_gen_controls(self,px,py,nid,raw,update):
         pad = 8
         bw = (self.w-pad*3)//2
         live = self.engine.generators.get(nid)
-        if not update:
+        if not update or not self.update_toggle:
 
             self.text_inputs.append(TextInput(
                 px+pad,py+6,self.w-pad*2,22,
                 f"Set MW ({raw.get('min_output_mw',0)}-{raw.get('max_output_mw',0)})",
                 lambda mw,_id=nid:self.engine.set_generator_setpoint(_id,mw),self.font
             ))
+            self.update_toggle = True
         is_online = live and live.status == 'online'
         is_standby = live and live.status == 'standby'
 
@@ -337,6 +391,8 @@ class InfoPanel:
             BTN_ORANGE,
             lambda _id=nid:self.engine.set_storage_rate(_id,-self.engine.storage[_id].max_discharge_rate_mw)
         ))
+    def _test_ship(self):
+        self.engine.test_ship = True
     def _build_load_controls(self,px,py,nid,raw,update):
         pad=8
         bw = (self.w-pad*3)//2
@@ -351,7 +407,8 @@ class InfoPanel:
             'SHED LOAD',
             px+pad,py+8,bw,22,
             BTN_ORANGE if can_shed else BTN_DIM,
-            (lambda _id=nid:self._shed_load(_id))
+            #(lambda _id=nid:self._shed_load(_id))
+            (lambda _id=nid: self._test_ship())
             if can_shed else lambda:None
         ))
         self.buttons.append(Button(

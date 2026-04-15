@@ -10,7 +10,9 @@ HUD_DIM = (100,120,140)
 SURPLUS_COL = (80,200,120)
 DEFICIT_COL = (255, 80 ,50)
 NEUTRAL_COL = (60, 80, 100)
-
+GRAY_SURPLUS_COL = (168, 168, 168)
+GRAY_DEFICIT_COL = (142, 142, 142)
+GRAY_NEUTRAL_COL = ( 74,  74,  74)
 
 FREQ_THRESHOLDS = [
     (60.2, 'normal', (80,200,120), None),
@@ -20,6 +22,15 @@ FREQ_THRESHOLDS = [
     (58.8, 'emergency', (255,60,40), 'UFLS Stage 1 - shed class 3 loads'),
     (58.4, 'severe', (255,30,30), 'UFLS Stage 2 - shed class 2 loads'),
     (-1, 'collapse', (200,0,200), 'GRID COLLAPSE IMMINENT')
+]
+GRAY_FREQ_THRESHOLDS = [
+    (60.2, 'normal',    (168, 168, 168), None),
+    (59.8, 'normal',    (168, 168, 168), None),
+    (59.5, 'warning',   (220, 220, 220), 'Amber - generation deficiency'),
+    (59.2, 'alert',     (186, 186, 186), 'Red - dispatch generation now'),
+    (58.8, 'emergency', (152, 152, 152), 'UFLS Stage 1 - shed class 3 loads'),
+    (58.4, 'severe',    (120, 120, 120), 'UFLS Stage 2 - shed class 2 loads'),
+    (-1,   'collapse',  ( 72,  72,  72), 'GRID COLLAPSE IMMINENT')
 ]
 FREQ_STATUS_LABELS = {
     'normal': 'NOMINAL',
@@ -47,18 +58,18 @@ def wrap_value(text, max_width, font):
     if current:
         lines.append(current)
     return lines if lines else [text]
-def get_freq_state(hz,freq):
+def get_freq_state(hz,freq,control_available):
     if freq == 50.0:
         hz+=10.0
     if hz > 60.2:
-        return ('warning', (255,200,50), 'High frequency - excess generation')
+        return ('warning', (255,200,50) if control_available else (220, 220, 220), 'High frequency - excess generation')
 
-    for threshold, status, colour, alarm in FREQ_THRESHOLDS:
+    for threshold, status, colour, alarm in (FREQ_THRESHOLDS if control_available else GRAY_FREQ_THRESHOLDS):
         if hz > threshold:
             return (status, colour, alarm)
 
-def get_freq_alarms(hz,freq):
-    status,col,alarm_text = get_freq_state(hz,freq)
+def get_freq_alarms(hz,freq,control_available):
+    status,col,alarm_text = get_freq_state(hz,freq,control_available)
     if status == 'normal' or alarm_text is None:
         return []
     severity_map = {
@@ -81,13 +92,13 @@ def _panel (surface, x,y,w,h):
     surface.blit(bg, (x,y))
     pygame.draw.rect(surface,HUD_BORDER,pygame.Rect(x,y,w,h),1)
 
-def draw_frequency_gauge(surface, fonts, hz, screen_w,freq, tick=0):
+def draw_frequency_gauge(surface, fonts, hz, screen_w,freq, tick=0,control_available=True):
     W,H = 200,120
     cx = screen_w//2
     x = cx - W//2
     y = 10
 
-    status, col, alarm_text = get_freq_state(hz,freq)
+    status, col, alarm_text = get_freq_state(hz,freq,control_available)
 
     if status in ('emergency', 'severe', 'collapse'):
         flash_alpha = 120 + int(80 * math.sin(tick * 0.2))
@@ -108,16 +119,27 @@ def draw_frequency_gauge(surface, fonts, hz, screen_w,freq, tick=0):
     arc_range = ARC_END - ARC_START
     freq_min = 58.0
     freq_max = 62.0
-
-    BAND_COLOURS = [
-        (60.2,62.0,(255,200,50)),
-        (59.8, 60.2, (80,200,120)),
-        (59.5, 59.8, (255,200,50)),
-        (59.2, 59.5, (255,120,40)),
-        (58.8, 59.2, (255,60,40)),
-        (58.4,58.8, (255,30,30)),
-        (58.0,58.4, (200, 0, 200)),
-    ]
+    if control_available:
+        BAND_COLOURS = [
+            (60.2,62.0,(255,200,50)),
+            (59.8, 60.2, (80,200,120)),
+            (59.5, 59.8, (255,200,50)),
+            (59.2, 59.5, (255,120,40)),
+            (58.8, 59.2, (255,60,40)),
+            (58.4,58.8, (255,30,30)),
+            (58.0,58.4, (200, 0, 200)),
+        ]
+    else:
+        hz = 60.0
+        BAND_COLOURS = [
+            (60.2, 62.0, (220, 220, 220)),
+            (59.8, 60.2, (168, 168, 168)),
+            (59.5, 59.8, (220, 220, 220)),
+            (59.2, 59.5, (186, 186, 186)),
+            (58.8, 59.2, (152, 152, 152)),
+            (58.4, 58.8, (120, 120, 120)),
+            (58.0, 58.4, (72, 72, 72)),
+        ]
     for band_min, band_max, band_col in BAND_COLOURS:
         pts = []
         start_t = (max(band_min, freq_min)-freq_min)/(freq_max-freq_min)
@@ -156,22 +178,30 @@ def draw_frequency_gauge(surface, fonts, hz, screen_w,freq, tick=0):
         tip_y = arc_cy + (radius-6) * math.sin(needle_rad)
         pygame.draw.line(surface,col,(arc_cx,arc_cy),(int(tip_x),int(tip_y)), 2)
         pygame.draw.circle(surface,col,(arc_cx,arc_cy), 4)
+        if control_available:
+            dig_surf = fonts['med_bold'].render(f"{hz:.3f} Hz", True,col)
+            surface.blit(dig_surf, (cx-dig_surf.get_width() // 2, y+H - 30))
 
-        dig_surf = fonts['med_bold'].render(f"{hz:.3f} Hz", True,col)
-        surface.blit(dig_surf, (cx-dig_surf.get_width() // 2, y+H - 30))
+            status_text = FREQ_STATUS_LABELS.get(status, '')
 
-        status_text = FREQ_STATUS_LABELS.get(status, '')
-
-        if status in ('emergency', 'severe', 'collapse'):
-            if (tick//15)%2 == 0:
-                st_surf = fonts['small_bold'].render(status_text, True,col)
-                surface.blit(st_surf, (cx-st_surf.get_width()//2, y+H-16))
+            if status in ('emergency', 'severe', 'collapse'):
+                if (tick//15)%2 == 0:
+                    st_surf = fonts['small_bold'].render(status_text, True,col)
+                    surface.blit(st_surf, (cx-st_surf.get_width()//2, y+H-16))
+            else:
+                st_surf = fonts['small_bold'].render(status_text,True,col)
+                surface.blit(st_surf,(cx-st_surf.get_width()//2, y+H-16))
         else:
-            st_surf = fonts['small_bold'].render(status_text,True,col)
-            surface.blit(st_surf,(cx-st_surf.get_width()//2, y+H-16))
+            dig_surf = fonts['med_bold'].render(f"--.- Hz", True, col)
+            surface.blit(dig_surf, (cx - dig_surf.get_width() // 2, y + H - 30))
+
+            status_text = "N/A"
+
+            st_surf = fonts['small_bold'].render(status_text, True, col)
+            surface.blit(st_surf, (cx - st_surf.get_width() // 2, y + H - 16))
 
 GRACE = 10
-def draw_gen_load_bat(surface, fonts, gen_mw, load_mw,screen_w, screen_h):
+def draw_gen_load_bat(surface, fonts, gen_mw, load_mw,screen_w, screen_h,control_available):
     W,H = 400,54
     x = screen_w//2 - W//2
     y = screen_h-H-10
@@ -194,29 +224,41 @@ def draw_gen_load_bat(surface, fonts, gen_mw, load_mw,screen_w, screen_h):
     fill_px = int(abs(delta)/max_mw*half)
     fill_px= min(fill_px,half)
 
-    if abs(delta)<GRACE:
-        delta = 0
-        gen_mw = load_mw
-    if delta>0:
-        col = SURPLUS_COL
-        pygame.draw.rect(surface,col,pygame.Rect(centere-fill_px,bar_y,fill_px,bar_h))
-    elif delta<0:
-        col = DEFICIT_COL
-        pygame.draw.rect(surface,col,pygame.Rect(centere,bar_y,fill_px,bar_h))
+    if control_available:
+        if abs(delta)<GRACE :
+            delta = 0
+            gen_mw = load_mw
+        if delta>0:
+            col = SURPLUS_COL
+            pygame.draw.rect(surface,col,pygame.Rect(centere-fill_px,bar_y,fill_px,bar_h))
+        elif delta<0:
+            col = DEFICIT_COL
+            pygame.draw.rect(surface,col,pygame.Rect(centere,bar_y,fill_px,bar_h))
+    else:
+        delta,gen_mw,load_mw = 0,0,0
 
     pygame.draw.line(surface,HUD_TEXT,(centere,bar_y-2), (centere,bar_y+bar_h+2),2)
-    gen_lbl = fonts['small'].render(f"GEN {gen_mw:.0f} MW", True,SURPLUS_COL)
-    load_lbl = fonts['small'].render(f"{load_mw:.0f} MW LOAD", True,DEFICIT_COL)
+    if control_available:
+        gen_lbl = fonts['small'].render(f"GEN {gen_mw:.0f} MW", True,SURPLUS_COL)
+        load_lbl = fonts['small'].render(f"{load_mw:.0f} MW LOAD", True,DEFICIT_COL)
+        sign = '+' if delta >= 0 else ''
+        delta_col = SURPLUS_COL if delta >= 0 else DEFICIT_COL
+        delta_lbl = fonts['small_bold'].render(f"{sign}{delta:.0f} MW", True, delta_col)
+        surface.blit(delta_lbl, (centere - delta_lbl.get_width() // 2, bar_y + bar_h + 4))
+    else:
+        gen_lbl = fonts['small'].render(f"GEN ---- MW", True,
+                                        GRAY_SURPLUS_COL)
+        load_lbl = fonts['small'].render(f"---- MW LOAD", True,
+                                         GRAY_DEFICIT_COL)
+        delta_col = GRAY_NEUTRAL_COL
+        delta_lbl = fonts['small_bold'].render(f"-- MW", True, delta_col)
+        surface.blit(delta_lbl,(centere-delta_lbl.get_width()//2,bar_y+bar_h+4))
     surface.blit(gen_lbl,(bar_x,bar_y+bar_h+4))
     surface.blit(load_lbl, (bar_x+bar_w-load_lbl.get_width(), bar_y+bar_h+4))
 
-    sign = '+' if delta >=0 else ''
-    delta_col = SURPLUS_COL if delta>=0 else DEFICIT_COL
-    delta_lbl = fonts['small_bold'].render(f"{sign}{delta:.0f} MW", True, delta_col)
-    surface.blit(delta_lbl,(centere-delta_lbl.get_width()//2,bar_y+bar_h+4))
 
 SPEED_STEPS = [1,5,30,60]
-def draw_status_panel(surface,fonts,game_state,time_multiplier=1.0):
+def draw_status_panel(surface,fonts,game_state,time_multiplier=1.0,control_available=True):
     W,H = 200,150
     x,y = 10,10
     _panel(surface,x,y,W,H)
@@ -233,24 +275,36 @@ def draw_status_panel(surface,fonts,game_state,time_multiplier=1.0):
     hour_12 = hour%12 or 12
     season = game_state.get('season','winter').capitalize()
     s_col = season_col.get(season.lower(), HUD_TEXT)
-    rows = [
-        ('Time', f"{hour_12:02d}:{int(game_state.get('minute')):02d} {am_pm}", HUD_TEXT),
-        ('Season', season,s_col),
-        ('Day', f"{game_state.get("day")}", HUD_TEXT),
-        ('Online', f"{game_state.get("gen_online", 0)} / {game_state.get('gen_total', 0)} units", HUD_TEXT),
-        ('Capacity', f"{game_state.get("total_capacity_mw", 0):.0f} MW", HUD_TEXT)
-    ]
+    if control_available:
+        score = game_state.get('score', 0)
+        score_col = (255, 210, 50)
+        score_surf = fonts['small_bold'].render(f"{score:,}", True, score_col)
+
+        rows = [
+            ('Time', f"{hour_12:02d}:{int(game_state.get('minute')):02d} {am_pm}", HUD_TEXT),
+            ('Season', season,s_col),
+            ('Day', f"{game_state.get("day")}", HUD_TEXT),
+            ('Online', f"{game_state.get("gen_online", 0)} / {game_state.get('gen_total', 0)} units", HUD_TEXT),
+            ('Capacity', f"{game_state.get("total_capacity_mw", 0):.0f} MW", HUD_TEXT)
+        ]
+    else:
+        score_col = (255, 210, 50)
+        score_surf = fonts['small_bold'].render(f"-", True, score_col)
+        rows = [
+            ('Time', f"{hour_12:02d}:{int(game_state.get('minute')):02d} {am_pm}", HUD_TEXT),
+            ('Season', season, s_col),
+            ('Day', f"{game_state.get("day")}", HUD_TEXT),
+            ('Online', f"-/- units", HUD_TEXT),
+            ('Capacity', f"---- MW", HUD_TEXT)
+        ]
     #testing diffrent things right now (the music next option and the day tick thingy)
     for i, (label,value,col) in enumerate(rows):
         ry = y+12+i*17
         surface.blit(fonts['tiny'].render(label,True,HUD_DIM),(x+8,ry))
         surface.blit(fonts['small'].render(value,True,col),(x+90,ry))
 
-    score = game_state.get('score',0)
-    score_col = (255,210,50)
     pygame.draw.line(surface,HUD_BORDER,(x,y+98),(x+W,y+98),1)
     surface.blit(fonts['tiny'].render('SCORE',True,HUD_DIM), (x+8,y+102))
-    score_surf = fonts['small_bold'].render(f"{score:,}", True, score_col)
     surface.blit(score_surf,(x+W-score_surf.get_width()-8,y+102))
     score_rect = pygame.Rect(x,y+98,W,16)
     pygame.draw.line(surface,HUD_BORDER,(x,y+114),(x+W,y+114),1)
@@ -304,7 +358,7 @@ def wrap_value(text, max_width, font):
     if current:
         lines.append(current)
     return lines if lines else [text]
-def draw_alarms_panel(surface,fonts, alarms,export_mw,screen_w):
+def draw_alarms_panel(surface,fonts, alarms,export_mw,screen_w,control_available):
     #text, severity(warning, critical,info)
     W = 220
     x = screen_w-W-10
@@ -333,13 +387,16 @@ def draw_alarms_panel(surface,fonts, alarms,export_mw,screen_w):
     }
     title = fonts['tiny'].render('INTERCONNECT', True,HUD_DIM)
     surface.blit(title,(x+8,y+6))
-
-    if export_mw>=0:
-        flow_text = f"EXPORT {export_mw:.0f} MW"
-        flow_col = (100,200,255)
+    if control_available:
+        if export_mw>=0:
+            flow_text = f"EXPORT {export_mw:.0f} MW"
+            flow_col = (100,200,255)
+        else:
+            flow_text = f"IMPORT {abs(export_mw):.0f}"
+            flow_col = (255,160,80)
     else:
-        flow_text = f"IMPORT {abs(export_mw):.0f}"
-        flow_col = (255,160,80)
+        flow_text = f"--- MW"
+        flow_col = (100, 200, 255)
     flow_surd = fonts['small_bold'].render(flow_text,True,flow_col)
     surface.blit(flow_surd, (x+W-flow_surd.get_width()-8,y+5))
 
@@ -381,14 +438,17 @@ def build_hud_fonts():
     }
 
 def draw_hud(surface, fonts,data, screen_w, screen_h,freq,detail):
-    freq_alarms = get_freq_alarms(data.get('hz',freq),freq)
-
-    merged = [a for a in data.get('alarms') if a.get('source') != 'frequency']
-    merged = freq_alarms + merged
-    draw_frequency_gauge(surface,fonts,data.get("hz",freq),screen_w,freq,data.get("tick", 0))
-    speed_rects,score_surf = draw_status_panel(surface,fonts,data.get("game_state"),data.get("time_multiplier"))
-    draw_gen_load_bat(surface,fonts,data.get("gen_mw"),data.get("load_mw"),screen_w,screen_h)
-    clear_rect = draw_alarms_panel(surface,fonts,merged,data.get("export_mw"),screen_w)
+    control_available = data.get("control_available",True)
+    if control_available:
+        freq_alarms = get_freq_alarms(data.get('hz',freq),freq,control_available)
+        merged = [a for a in data.get('alarms') if a.get('source') != 'frequency']
+        merged = freq_alarms + merged
+    else:
+        merged = [{"text": "No operational control centers", "severity": "critical", "time": 0}]
+    draw_frequency_gauge(surface,fonts,data.get("hz",freq),screen_w,freq,data.get("tick", 0),control_available)
+    speed_rects,score_surf = draw_status_panel(surface,fonts,data.get("game_state"),data.get("time_multiplier"),control_available)
+    draw_gen_load_bat(surface,fonts,data.get("gen_mw"),data.get("load_mw"),screen_w,screen_h,control_available)
+    clear_rect = draw_alarms_panel(surface,fonts,merged,data.get("export_mw"),screen_w,control_available)
     if detail:
         draw_score_analytics(surface, data.get("game_state").get('score_details'), fonts)
     return {'clear_rect':clear_rect,'speed_rects':speed_rects,'score_rect':score_surf}

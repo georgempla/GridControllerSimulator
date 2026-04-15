@@ -1,5 +1,6 @@
 from importlib.resources import read_text
-from os import truncate
+from nt import truncate
+from time import process_time
 from tkinter.ttk import Label
 
 import pygame, math
@@ -330,6 +331,26 @@ def draw_load_mixed(surface, x, y, size):
     th = int(half * 0.9)
     tx = x + half // 2
     _rect(surface, COLOURS['load_1'], tx, y, tw, th, width=2)
+def draw_control_center(surface,x,y,size):
+    c=(100,200,255)
+    r=size//2
+    _rect(surface,c,x,y+size//8,size,int(size*0.6),width=2)
+    sw = max(2,size//5)
+    sh = max(2,size//6)
+    for i in range(3):
+        mx = x-size//3+i*(size//3)
+        _rect(surface,c,mx,y,sw,sh,width=1)
+    _line(surface,c,x,y,0,-r,0,-int(r*0.35),1)
+    _line(surface,c,x,y,-size//5,-r+2,size//5,-r+2)
+def draw_backup_control_center(surface,x,y,size):
+    c = (60,120,160)
+    r=size//2
+    _rect(surface,c,x,y+size//8,size,int(size*0.6),width=2)
+    sw = max(3,size//3)
+    sh=max(2,size//6)
+    _rect(surface,c,x,y,sw,sh,width=1)
+    _circle(surface,(255,180,40),x+size//3,y-size//5,max(2,size//8))
+    _line(surface,c,x,y,0,-r,0,-int(r*0.5),1)
 
 def draw_icons(surface, node,x, y, size):
     subtype = node.get('subtype','')
@@ -344,6 +365,7 @@ def draw_icons(surface, node,x, y, size):
     elif 'open_cycle' in subtype: draw_gas_peaker(surface,x,y,size)
     elif 'biomass' in subtype: draw_biomass(surface,x,y,size)
     elif 'battery' in subtype: draw_battery(surface, x, y, size//2)
+    elif 'EMS_SCADA' == t:draw_control_center(surface, x, y, size)
+    elif 'backup_EMS' ==t:draw_backup_control_center(surface,x,y,size)
     elif 'load_nodes' in t:draw_load(surface, x, y, size//1.5, node)
-
     else: draw_substation(surface, x,y,size//1.5)

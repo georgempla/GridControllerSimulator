@@ -148,6 +148,7 @@ while run:
         elif STATE == 'game_over':
             result = game_over_screen.handle_event(event)
             if result == 'restart':
+
                 camera,oakridge = make_game("maps/oakridge_grid.json",cur_settings)
                 game_over_screen = None
                 STATE = 'game'
