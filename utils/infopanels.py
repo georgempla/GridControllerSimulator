@@ -1,6 +1,5 @@
 
 import pygame
-from pefile import retrieve_flags
 from pygame.draw import lines
 
 
