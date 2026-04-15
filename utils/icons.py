@@ -1,5 +1,5 @@
 from importlib.resources import read_text
-from nt import truncate
+from os import truncate
 from time import process_time
 from tkinter.ttk import Label
 
