@@ -924,7 +924,7 @@ class SimulationEngine:
         if self.winter_storm:
             self.winter_storm_countdown -= dt_min
             if self.winter_storm_countdown<=0:
-                self._add_alarm("Winter storm (whiteout) has passed all negative effects have been resolved") #Glory to New London, hail the captain/steward, we will embrace the frost, turn the wheels of progress and uphold reason and fight for merit for we are the proteans and with our vision we will save humanity! (I might be going insane from the sleep deprevation, thankfully noone will ever see this comment :), for anyone who didn't get it it's a Frostpunk refrence)
+                self._add_alarm("Winter storm (whiteout) has passed all negative effects have been resolved",'info') #Glory to New London, hail the captain/steward, we will embrace the frost, turn the wheels of progress and uphold reason and fight for merit for we are the proteans and with our vision we will save humanity! (I might be going insane from the sleep deprevation, thankfully noone will ever see this comment :), for anyone who didn't get it it's a Frostpunk refrence)
                 self.random_line_trip_rate = 1
                 self.winter_storm=False
 
