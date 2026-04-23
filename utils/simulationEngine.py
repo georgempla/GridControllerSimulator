@@ -1,3 +1,4 @@
+import json
 from functools import total_ordering
 from sys import orig_argv
 from time import process_time
@@ -167,7 +168,7 @@ class SimulationEngine:
     }
 
 
-    def __init__(self, grid_data:dict,freq,lines):
+    def __init__(self, grid_data:dict,freq,lines,ach_path):
         self.data = grid_data
         self.time_multiplier = 1.0
         self.sim_time_min = 300.0
@@ -194,9 +195,25 @@ class SimulationEngine:
         self.cyberattack_cooldown = 0
         self.cyberattack_end_at = 0
         self.cyberattack_end = 0
-        self.random_line_trip_rate = 1
+        self.random_line_trip_rate = 2
         self.winter_storm = False
         self.winter_storm_countdown = 0
+        self.cyberattack_ending=False
+        self.suppress_game_over = False
+        self.freeze_freq = False
+        self.freeze = False
+        self.test_cyber = False
+        self.test_whiteout = False
+        self.line_trip_conds = []
+        self.notifications = []
+        self.frequency_timer = 300
+        self.events_preq = True
+        self.tripped_generator = False
+
+
+        self.ach_path = ach_path
+        with open(ach_path,'r') as file:
+            self.ACHIEVEMENTS = json.load(file)
 
         self.COLLAPSE_HZ = freq-1.6
 
@@ -737,6 +754,8 @@ class SimulationEngine:
             if lid in self.lines:
                 self.lines[lid].flow_mw = flow
     def _tick_frequency(self,dt_seconds):
+        if self.freeze_freq:
+            return
         #swing equation to calculate frequency
         total_gen = sum(g.current_output_mw for g in self.generators.values() if g.status =='online' or g.status == 'tripping' and g.node_id in self.reachable)
         for s in self.storage.values():
@@ -760,7 +779,7 @@ class SimulationEngine:
             df_dt = (imbalance/(2*total_inertia)) *self.F_NOMINAL
             self.frequency_hz += df_dt*dt_seconds
             self.frequency_hz = max(self.F_NOMINAL-3.0,min(self.F_NOMINAL+3.0,self.frequency_hz))
-        if self.frequency_hz <=self.F_NOMINAL-0.5:
+        if self.frequency_hz <=self.F_NOMINAL-0.5 and not self.suppress_game_over:
             self.time_multiplier = 1
     def _tick_protection(self,dt_seconds):
         for line in self.lines.values():
@@ -795,8 +814,14 @@ class SimulationEngine:
         line.overload_timer = 0.0
         if alert:
             self._add_alarm(alert,'critical')
+            if self._award_ach("2"):
+                with open(self.ach_path, "w") as f:
+                    json.dump(self.ACHIEVEMENTS, f)
         else:
             self._add_alarm(f"LINE TRIP: {line.name}", 'critical')
+        self.line_trip_conds.append(int(self.sim_time_min))
+        while len(self.line_trip_conds)>3:
+            self.line_trip_conds.pop(0)
         self._build_b_matrix()
     def _check_cascade(self):
         changed = True
@@ -856,6 +881,10 @@ class SimulationEngine:
                 if load.shed_mw>0 and load.priority_class<=3:
                     load.shed_mw = max(0.0,load.shed_mw-1.0)"""
         if self.frequency_hz<self.COLLAPSE_HZ:
+            if self.tripped_generator:
+                if self._award_ach("9"):
+                    with open(self.ach_path, "w") as f:
+                        json.dump(self.ACHIEVEMENTS, f)
             self.game_over=True
             self.game_over_reason = f"Grid collapse - frequency below {self.F_NOMINAL-1.6} Hz"
     def _tick_events(self, dt_seconds):
@@ -865,6 +894,7 @@ class SimulationEngine:
             self.cyberattack_cooldown-=dt_min
             self.cyberattack_end-=dt_min
         rate = 5
+        event_happened = False
         if self.ship_event and int(self.sim_time_min) in range(int(self.ship_time_min),int(self.ship_time_min)+20):
             if not self.ship_arrived:
                 self.ship_arrived = True
@@ -875,11 +905,14 @@ class SimulationEngine:
             else:
                 self.ship_arrived = False
                 self.ship_event = False
-
+                if self._award_ach("7"):
+                    with open(self.ach_path, "w") as f:
+                        json.dump(self.ACHIEVEMENTS, f)
                 self._add_alarm(
                     f"The ship has departed. No additional power will be drawn",
                     "info")
-        if (random.randint(0,int(8760/ticks_per_hour))<rate and not self.ship_event):
+        if ((random.randint(0,int(87600/ticks_per_hour))<rate or self.test_ship) and not self.ship_event):
+            event_happened = True
             self.ship_event = True
             self.test_ship = False
 
@@ -888,16 +921,21 @@ class SimulationEngine:
                 self.ship_time_min -= 1440
 
             self._add_alarm(f"A large ship will be docking at the port at precicely {(self.current_hour+2)%24}:{int(self.sim_time_min%60):02d}","info")
-        if random.randint(0,int(8760/ticks_per_hour))<0.2:
+        if (random.randint(0,int(87600/ticks_per_hour))<0.2 or self.test_cyber) and not self.cyberattack:
+            event_happened = True
             self.cyberattack = True
+            self.test_cyber = False
             self._add_alarm("A cyberattack by foreign actors is in progress, random line will be tripped, switch to backup control to resolve",'critical')
         if self.cyberattack :
             if self.control_center.status == "operational":
                 self.cyberattack_ending = False
                 if self.cyberattack_cooldown<=0:
-                    line = random.choice(self.online_lines)
-                    self._trip_line(line)
-                    self.cyberattack_cooldown = random.randint(5,15)
+                    try:
+                        line = random.choice(self.online_lines)
+                        self._trip_line(line)
+                        self.cyberattack_cooldown = random.randint(5,15)
+                    except IndexError:
+                        print("no lines available")
             else:
 
                 if not self.cyberattack_ending:
@@ -911,12 +949,15 @@ class SimulationEngine:
                         self._add_alarm("The cyberattack has ended all abnormal behaviour has stopped",'info')
                         self.cyberattack = False
                         self.cyberattack_ending = False
-                        self.test_ship = False
-        if (random.randint(1,int(8760/ticks_per_hour))<self.random_line_trip_rate and self.current_season == "winter"):
+                        if self._award_ach("6"):
+                            with open(self.ach_path, "w") as f:
+                                json.dump(self.ACHIEVEMENTS, f)
+        if (random.randint(1,int(87600/ticks_per_hour))<self.random_line_trip_rate and self.current_season == "winter"):
+            event_happened = True
             line = random.choice(self.online_lines)
             self._trip_line(line,f"Line {line.name} tripped due to excess snow build up, please restore immidiently")
-            self.test_ship = False
-        if (random.randint(1,int(8760/ticks_per_hour))<1 or self.test_ship) and not self.winter_storm:
+        if (random.randint(1,int(87600/ticks_per_hour))<1 or self.test_whiteout) and not self.winter_storm:
+            event_happened = True
             self._add_alarm("The Winter Storm (Whiteout) has arrived, power usage will be increased, snow buildup on power lines has increased",'critical')
             self.winter_storm= True
             self.winter_storm_countdown = int(self.sim_time_min-1)
@@ -925,9 +966,16 @@ class SimulationEngine:
             self.winter_storm_countdown -= dt_min
             if self.winter_storm_countdown<=0:
                 self._add_alarm("Winter storm (whiteout) has passed all negative effects have been resolved",'info') #Glory to New London, hail the captain/steward, we will embrace the frost, turn the wheels of progress and uphold reason and fight for merit for we are the proteans and with our vision we will save humanity! (I might be going insane from the sleep deprevation, thankfully noone will ever see this comment :), for anyone who didn't get it it's a Frostpunk refrence)
+                if self._award_ach("8"):
+                    with open(self.ach_path, "w") as f:
+                        json.dump(self.ACHIEVEMENTS, f)
                 self.random_line_trip_rate = 1
                 self.winter_storm=False
 
+        sim_hour = self.sim_time_min / 60
+
+        if event_happened and sim_hour>=5 and sim_hour<=7:
+            self.events_preq = False
         for g in self.generators.values():
             if g.status != 'online':
                 continue
@@ -996,6 +1044,7 @@ class SimulationEngine:
             g.operator_setpoint_mw = min(mw,g.max_output_mw)
 
     def trip_generator(self, gen_id:str):
+        self.tripped_generator = True
         g = self.generators.get(gen_id)
         if g and g.status == 'online':
             g.status = 'tripping'
@@ -1020,10 +1069,85 @@ class SimulationEngine:
         load = self.loads.get(load_id)
         if load and load.priority_class>0:
             load.shed_mw=0.0
+            
+    def handle_sandbox(self,tag):
+        if tag == "nogameover":
+            self.suppress_game_over = not self.suppress_game_over
+        elif tag == "tripallgens":
+            for gen in self.generators:
+                self.trip_generator(gen)
+        elif tag == "freezefreq":
+            self.freeze_freq = not self.freeze_freq
+        elif tag == "freeze":
+            self.freeze = not self.freeze
+        elif tag == "shipevent":
+            self.test_ship = True
+        elif tag == "cyberevent":
+            self.test_cyber = True
+        elif tag == "tripalllines":
+            for line in self.lines.items():
+                self._trip_line(line[1])
+        elif tag=="whiteoutevent":
+            self.test_whiteout = True
+        elif tag =="stopevents":
+            self.cyberattack = False
+            self.winter_storm = False
+            self.ship_event = False
+            self.ship_arrived = False
+            self.random_line_trip_rate = False
+            self.cyberattack_ending = False
+            self.test_cyber = False
+            self.test_whiteout = False
+            self.test_ship = False
+    def _award_ach(self,id):
+        ach = self.ACHIEVEMENTS[id]
+        if ach["unlocked"]:
+            return False
+        ach["unlocked"] = True
+        self.notifications.append([0,f"""{ach["name"]}:\n{ach["desc"]}"""])
+        return True
+
+    def _tick_achievments(self,dt_seconds):
+        push_write = False
+        dt_min = dt_seconds/5.0
+
+        if len(self.line_trip_conds) == 3:
+            success = True
+            sim_min = 0
+            for line in self.line_trip_conds:
+                if sim_min == 0:
+                    sim_min = line
+                elif line != sim_min:
+                    success = False
+                    break
+            if success:
+                push_write = self._award_ach("3")
+        if self.frequency_hz>=59.8 and self.frequency_hz<=60.2:
+            self.frequency_timer -= dt_min
+        else:
+            self.frequency_timer = 300
+        if self.frequency_timer<=0:
+            push_write = self._award_ach("1")
+        sim_hour = self.sim_time_min/60
+        if not(sim_hour>=5 and sim_hour<=7):
+            if self.events_preq:
+                push_write =self._award_ach("4")
+                self.events_preq = False
+        success = True
+        for g in self.generators.values():
+            if g.status == "online":
+                if g.carbon_kg_per_mwh != 0:
+                    success = False
+        if success:
+            push_write = self._award_ach("5")
+        if push_write:
+            with open(self.ach_path,"w") as f:
+                json.dump(self.ACHIEVEMENTS,f)
+
 
     def tick(self, real_dt_seconds:float):
         #call every frame, real time converted to ticks with time_multiplier
-        if self.game_over:
+        if self.game_over or self.freeze:
             return
         sim_dt = real_dt_seconds *self.time_multiplier
         self._ufls_cooldown = max(0.0,self._ufls_cooldown-sim_dt)
@@ -1043,7 +1167,9 @@ class SimulationEngine:
         self._tick_events(sim_dt)
         self._tick_score(sim_dt)
         self._tick_control()
-
+        self._tick_achievments(sim_dt)
+        if self.suppress_game_over:
+            self.game_over = False
     def hud_data(self) -> dict:
         total_gen = sum(
             g.current_output_mw for g in self.generators.values()

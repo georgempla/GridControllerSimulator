@@ -415,6 +415,7 @@ def draw_alarms_panel(surface,fonts, alarms,export_mw,screen_w,control_available
     surface.blit(clr_lbl, (clear_rect.centerx- clr_lbl.get_width()//2, clear_rect.centery-clr_lbl.get_height()//2))
     pygame.draw.line(surface,HUD_BORDER,(x,y+34), (x+W, y +34), 1)
 
+
     if not alarms:
         no_alarms=fonts['small'].render("All systems nominal", True,(80,200,120))
         surface.blit(no_alarms, (x+8, y +40))

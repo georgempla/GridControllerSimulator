@@ -48,6 +48,9 @@ The map covers a fictional Alaskan city with a diverse generation mix and severa
 - A cyberattack: Foreign state actors have hijacked the control of your network and will randomly trip lines every 5-7 minutes, in order to defeat them you need to switch control over to the backup control center at which point the IT team will resolve the attack within the hour (55-65 minutes)
 - A random winter trip: The heavy snow in Alaska often causes trouble on the local infrastructure especially on sensitive exposed equipment. Lines can trip due to snow buildup and should be restored immediately.
 - The whiteout is upon us: A large winter storm has hit Oakridge, it is recommended everyone stays inside. Subsequently power draw is increased by 10% and line trip risk due to snow build up has risen by up to 5 times
+
+**Sandbox**
+- You can experience the Oakridge map in sandbox mode with a menu that allows you to do anything from disabling game over to tripping all the lines at the same time!
 ---
 
 ## Frequency Governs Everything
@@ -108,6 +111,19 @@ Your score accumulates every second based on two factors:
 
 There is no time limit. Your final score is shown on the game over screen when the grid collapses.
 
+
+### Achievements
+Here is a list of all the achievements:
+- **By the book** Survive 5 hours at nominal frequency
+- **Out of the blue** Have a line trip due to heavy snow buildup
+- **Lighting fast** Trip or have tripped 3 lines at the same time
+- **A quiet morning** Have no events happen from 5 to 7 am
+- **Net zero** Run only on green fuel sources
+- **Cyberdefender** Defeat the cyberattack
+- **Aye aye captain** Smoothly handle a ship docking
+- **Bundle up the frost is here** Survive the incoming whiteout
+- **You're fired** Manually trip a generator leading to grid collapse
+
 ---
 
 ## Getting Started
@@ -159,10 +175,17 @@ GridControllerSimulator/
 │   ├── main_menu.py
 │   ├── settings.py
 │   ├── tutorial.py
+│   ├── notification.py
+│   ├── achievments.py
+│   ├── sandbox_menu.py
 │   └── disclaimer.py
+├── data/
+│   └── ACHIEVEMENTS.json
 └── assets/
     ├── grid_controller.ico
     ├── grid_controller.png
+    ├── ach.png
+    ├── record.png
     ├── alert.ogg
     ├── ambient1.ogg
     ├── ambient2.ogg

@@ -86,7 +86,7 @@ class MapRenderer:
     ICON_THRESHOLD = 0.8
     LABEL_THRESHOLD = 1
     
-    def __init__(self,nodes, lines, data, camera, font,font_bold, screen_w, screen_h,freq,tutorial=None):
+    def __init__(self,nodes, lines, data, camera, font,font_bold, screen_w, screen_h,freq,ach_path,tutorial=None,sandbox=None):
         self.font = font
         self.font_bold = font_bold
         self.nodes = nodes
@@ -98,8 +98,9 @@ class MapRenderer:
         #Don't ask this subtraction somehow fixes the tutorial
         self.last_tick = time.time()-0.1
         self.hud_fonts = build_hud_fonts()
-        self.SimulationEngine = SimulationEngine(data,freq,lines)
+        self.SimulationEngine = SimulationEngine(data,freq,lines,ach_path)
         self.lines = []
+        self.sandbox=sandbox
 
         self.node_map = {n['id']: n for n in nodes}
         self.tutorial = tutorial
@@ -130,6 +131,8 @@ class MapRenderer:
             self.last_tick = time.time()
         if not self.SimulationEngine.control_available:
             self.panels = []
+        if self.sandbox:
+            self.sandbox.draw(surface,self.hud_fonts)
         self.rects = draw_hud(surface, self.hud_fonts, self.SimulationEngine.hud_data(),self.screen_w, self.screen_h,self.freq,self.score_detail_show)
 
         if self.rects['score_rect'].collidepoint(pygame.mouse.get_pos()):
@@ -265,6 +268,12 @@ class MapRenderer:
         if self.tutorial and not self.tutorial.done:
             consumed = self.tutorial.handle_event(event,self.panels)
             if consumed:
+                return True
+        if self.sandbox:
+            consumed = self.sandbox.handle_event(event,pygame.mouse.get_pos())
+            if consumed:
+                self.SimulationEngine.handle_sandbox(consumed)
+                print(consumed)
                 return True
         consumed = any(p.handle_event(event) for p in reversed(self.panels))
         if consumed:

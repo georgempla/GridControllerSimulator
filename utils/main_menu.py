@@ -30,8 +30,8 @@ MENU_ITEMS =[
         'id':'sandbox',
         'label':'Sandbox Mode',
         'sub': 'Unlimited resources with no failure conditions',
-        'tag':'COMING SOON',
-        'locked':True
+        'tag':'AVAILABLE',
+        'locked':False
     },
     {
         'id': 'campaign',
@@ -65,8 +65,8 @@ MENU_ITEMS =[
         'id':'achievements',
         'label':'Achievements',
         'sub': 'Track records and unlock bonuses',
-        'tag':'COMING SOON',
-        'locked':True
+        'tag':'AVAILABLE',
+        'locked':False
     }
 ]
 
