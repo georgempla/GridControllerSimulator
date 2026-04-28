@@ -1,4 +1,3 @@
-from idlelib.pyparse import trans
 
 from utils.icons import draw_icons, draw_label
 
