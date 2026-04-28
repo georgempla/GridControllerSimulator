@@ -51,8 +51,8 @@ MENU_ITEMS =[
         'id':'custom_map',
         'label':'Custom Map Support',
         'sub': 'Load your own grid JSON',
-        'tag':'COMING SOON',
-        'locked':True
+        'tag':'AVAILABLE',
+        'locked':False
     },
     {
         'id':'market',
@@ -154,7 +154,7 @@ class MainMenu:
         self._draw_bottom_btn(surface, self.settings_rect,"SETTINGS",False,mouse)
         self._draw_bottom_btn(surface, self.quit_rect, "QUIT",False,mouse)
 
-        ver = self.font_small.render("v0.1.4-alpha",True,(35,45,58))
+        ver = self.font_small.render("v0.1.2-alpha",True,(35,45,58))
         surface.blit(ver,(self.screen_w-ver.get_width()-8,self.screen_h-ver.get_height()-6))
 
     def _draw_item(self,surface,item,rect,mouse):

@@ -209,6 +209,7 @@ class SimulationEngine:
         self.frequency_timer = 300
         self.events_preq = True
         self.tripped_generator = False
+        self.first = True
 
 
         self.ach_path = ach_path
@@ -770,6 +771,14 @@ class SimulationEngine:
                          )
         imbalance = total_gen - total_load
 
+        if self.first and abs(imbalance)>20:
+            main_gen = self.generators['GEN-001']
+            req_mw = main_gen.min_output_mw - imbalance
+            main_gen.setpoint_mw = req_mw
+            main_gen.current_output_mw=req_mw
+            main_gen.operator_setpoint_mw=req_mw
+            self.first = False
+
         total_inertia = sum(g.inertia_constant*g.installed_capacity_mw for g in self.generators.values() if g.status == 'online' and g.inertia_constant>0)*self.INERTIA_MULTIPLIER
         if total_inertia <1.0:
             total_inertia=1.0
@@ -1168,6 +1177,7 @@ class SimulationEngine:
         self._tick_score(sim_dt)
         self._tick_control()
         self._tick_achievments(sim_dt)
+
         if self.suppress_game_over:
             self.game_over = False
     def hud_data(self) -> dict:

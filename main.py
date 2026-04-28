@@ -13,6 +13,8 @@ from utils.settings import Settings
 from utils.sandbox_menu import SandboxMenu
 from utils.notification import Notification
 from utils.achievments import AchievementsMenu
+from utils.custom_map_selector import CustomMapMenu
+from utils.map_builder import MapBuilder
 
 #welcome to the game:)
 def resource_path(relative):
@@ -43,11 +45,13 @@ screen = pygame.display.set_mode((SCREEN_WIDTH,SCREEN_HEIGHT))
 pygame.display.set_caption("Grid Controller Simulator")
 icon = pygame.image.load(resource_path("assets/grid_controller.png"))
 pygame.display.set_icon(icon)
+pygame.scrap.init()
+
 
 def make_game(map,cur_settings,with_tutorial=False,with_sandbox=False):
     global cam_module,map_renderer,restart_with_sandbox
     camera = cam_module.Camera()
-    nodes, lines,data = map_renderer.load_grid(resource_path(map))
+    nodes, lines,data = map_renderer.load_grid(map if os.path.isabs(map) else resource_path(map))
     tutorial = None
     sandbox = None
     restart_with_sandbox = with_sandbox
@@ -93,7 +97,7 @@ TRACKS = [
 
 current_track=0
 STATE = 'disclaimer'
-cur_settings = {'fullscreen':False,'freq':True,'music':60,'calm':False}
+cur_settings = {'fullscreen':False,'freq':True,'music':0,'calm':False}
 fullscreen = False
 menu = MainMenu(SCREEN_WIDTH,SCREEN_HEIGHT)
 camera,oakridge = None,None
@@ -108,6 +112,7 @@ MUSIC_END = pygame.USEREVENT+1
 pygame.mixer.music.set_endevent(MUSIC_END)
 notification_stack = []
 ach_path = resource_path("data/ACHIEVEMENTS.json")
+custom_map_menu = None
 
 play_track(current_track)
 
@@ -146,6 +151,9 @@ while run:
                 achievements = AchievementsMenu(SCREEN_WIDTH,SCREEN_HEIGHT,ach_path)
             elif action == 'settings':
                 STATE = 'settings'
+            elif action == 'custom_map':
+                custom_map_menu = CustomMapMenu(SCREEN_WIDTH,SCREEN_HEIGHT,maps_dir=resource_path('maps'))
+                STATE='custom_map'
             elif action == 'quit':
                 run = False
         elif STATE == 'game':
@@ -181,7 +189,21 @@ while run:
             result = achievements.handle_event(event)
             if result == "back":
                 STATE = 'menu'
-
+        elif STATE == 'custom_map':
+            result = custom_map_menu.handle_event(event)
+            if result == 'back':
+                STATE = 'menu'
+            elif isinstance(result,tuple) and result[0] == 'load':
+                camera,oakridge = make_game(result[1],cur_settings)
+                STATE = 'game'
+            elif isinstance(result,str) and result == 'open_builder':
+                map_builder = MapBuilder(SCREEN_WIDTH,SCREEN_HEIGHT)
+                STATE = 'map_builder'
+        elif STATE == 'map_builder':
+            result = map_builder.handle_event(event)
+            if result == 'back':
+                custom_map_menu = CustomMapMenu(SCREEN_WIDTH,SCREEN_HEIGHT,maps_dir=resource_path('maps'))
+                STATE = 'custom_map'
     screen.fill((10,10,10))
     if STATE == 'disclaimer':
         disclaimer.draw(screen)
@@ -214,6 +236,12 @@ while run:
         clock.tick(60)
     elif STATE == 'achievements':
         achievements.draw(screen)
+    elif STATE == 'custom_map':
+        custom_map_menu.draw(screen)
+        clock.tick(60)
+    elif STATE == 'map_builder':
+        map_builder.draw(screen)
+        clock.tick(60)
     for i,notification in enumerate(notification_stack):
         consumed = notification.draw(screen, STATE!="game")
 
